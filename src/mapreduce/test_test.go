@@ -38,7 +38,7 @@ func ReduceFunc(key string, values []string) string {
 	for _, e := range values {
 		debug("Reduce %s %v\n", key, e)
 	}
-	return ""
+	return key
 }
 
 // Checks input file agaist output file: each input number should show up
@@ -137,10 +137,10 @@ func setup() *Master {
 }
 
 func cleanup(mr *Master) {
-	mr.CleanupFiles()
-	for _, f := range mr.files {
-		removeFile(f)
-	}
+	// mr.CleanupFiles()
+	// for _, f := range mr.files {
+	// 	removeFile(f)
+	// }
 }
 
 func TestSequentialSingle(t *testing.T) {
