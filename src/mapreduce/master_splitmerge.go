@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"sort"
 )
 
 // merge combines the results of the many reduce jobs into a single output file
@@ -36,7 +35,7 @@ func (mr *Master) merge() {
 	for k := range kvs {
 		keys = append(keys, k)
 	}
-	sort.Strings(keys)
+	//sort.Strings(keys)
 
 	file, err := os.Create("mrtmp." + mr.jobName)
 	if err != nil {

@@ -28,11 +28,9 @@ func mapF(filename string, contents string) []mapreduce.KeyValue {
 		wordMap[word]++
 	}
 
-	keyValueList := make([]mapreduce.KeyValue, len(wordMap))
-	i := 0
-	for word, count := range wordMap {
-		keyValueList[i] = mapreduce.KeyValue{word, strconv.Itoa(count)}
-		i++
+	keyValueList := make([]mapreduce.KeyValue, len(words))
+	for i, word := range words {
+		keyValueList[i] = mapreduce.KeyValue{word, "1"}
 	}
 
 	return keyValueList
@@ -52,7 +50,6 @@ func reduceF(key string, values []string) string {
 		}
 		sum = sum + i
 	}
-	//fmt.Printf("%v: %v\n", key, strconv.Itoa(sum))
 	return strconv.Itoa(sum)
 }
 

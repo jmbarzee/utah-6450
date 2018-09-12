@@ -137,10 +137,10 @@ func setup() *Master {
 }
 
 func cleanup(mr *Master) {
-	// mr.CleanupFiles()
-	// for _, f := range mr.files {
-	// 	removeFile(f)
-	// }
+	mr.CleanupFiles()
+	for _, f := range mr.files {
+		removeFile(f)
+	}
 }
 
 func TestSequentialSingle(t *testing.T) {
