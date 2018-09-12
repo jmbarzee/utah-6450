@@ -2,6 +2,7 @@ package mapreduce
 
 import (
 	"fmt"
+	"sync"
 )
 
 //
@@ -27,49 +28,44 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 
 	fmt.Printf("Schedule: %v %v tasks (%d I/Os)\n", ntasks, phase, n_other)
 
-	taskStates := make([]taskState, ntasks)
+	var waitGroup sync.WaitGroup
 
-	tasksPending := true
-	for tasksPending {
-		tasksPending = false
-		for i, state := range taskStates {
-			fmt.Printf("Checking %v \n", i)
-			if state == waiting {
-				tasksPending = true
-				taskStates[i] = pending
-				fmt.Printf("	Waiting on addr \n")
-				addr := <-registerChan
-				fmt.Printf("	Found addr: %s \n", addr)
-				go func() {
-					fileName := ""
-					if phase == mapPhase {
-						fileName = mapFiles[i]
-					}
-					args := DoTaskArgs{
-						JobName:       jobName,
-						File:          fileName,
-						Phase:         phase,
-						TaskNumber:    i,
-						NumOtherPhase: n_other,
-					}
-
-					var reply struct{}
-
-					ok := call(addr, "Worker.DoTask", args, &reply)
-					if ok {
-						taskStates[i] = success
-						registerChan <- addr
-					} else {
-						taskStates[i] = waiting
-					}
-				}()
-			} else if state == pending {
-				tasksPending = true
-			} else if state == success {
-				// Cool! Do nothing
-			}
+	for i := 0; i < ntasks; i++ {
+		if i == 100 {
+			fmt.Println("What the fuck?!")
 		}
+		waitGroup.Add(1)
+		j := i // Trying to fix problems with Closures. Is there something I don't get?
+		go func() {
+			if j == 100 {
+				fmt.Println("What the fuck x2?!")
+			}
+			done := false
+			var addr string
+			for !done {
+				addr = <-registerChan
+				fileName := ""
+				if phase == mapPhase {
+					fileName = mapFiles[j]
+				}
+				args := DoTaskArgs{
+					JobName:       jobName,
+					File:          fileName,
+					Phase:         phase,
+					TaskNumber:    j,
+					NumOtherPhase: n_other,
+				}
+
+				var reply struct{}
+
+				done = call(addr, "Worker.DoTask", args, &reply)
+			}
+			waitGroup.Done()
+			registerChan <- addr
+		}()
 	}
+
+	waitGroup.Wait()
 
 	// All ntasks tasks have to be scheduled on workers, and only once all of
 	// them have been completed successfully should the function return.
@@ -80,11 +76,3 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 	//
 	fmt.Printf("Schedule: %v phase done\n", phase)
 }
-
-type taskState int32
-
-var (
-	waiting = taskState(0)
-	pending = taskState(1)
-	success = taskState(2)
-)

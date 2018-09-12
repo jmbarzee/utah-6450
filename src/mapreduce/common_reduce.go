@@ -87,5 +87,5 @@ func doReduce(
 type ByValue []KeyValue
 
 func (a ByValue) Len() int           { return len(a) }
-func (a ByValue) Less(i, j int) bool { return a[i].Value > a[j].Value }
+func (a ByValue) Less(i, j int) bool { return a[i].Value < a[j].Value }
 func (a ByValue) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
