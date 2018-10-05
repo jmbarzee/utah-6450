@@ -3,11 +3,36 @@ package raft
 import "log"
 
 // Debugging
-const Debug = 0
+const (
+	debug      = false
+	debugState = true
+	debugLocks = false
+)
 
-func DPrintf(format string, a ...interface{}) (n int, err error) {
-	if Debug > 0 {
+func debugf(format string, a ...interface{}) {
+	if debug {
 		log.Printf(format, a...)
 	}
-	return
+}
+
+func debugStatef(format string, a ...interface{}) {
+	if debug && debugState {
+		log.Printf(format, a...)
+	}
+}
+
+func dumpState(context string, rf *Raft) {
+	//debugLocksf("%v.dumpState - waiting\n", rf.me)
+	rf.mu.Lock()
+	{
+		debugStatef("%v.%v - { T:%v L:%v V:%v }\n", rf.me, context, rf.Term, rf.Leader, rf.Vote)
+	}
+	rf.mu.Unlock()
+	//debugLocksf("%v.dumpState - freed\n", rf.me)
+}
+
+func debugLocksf(format string, a ...interface{}) {
+	if debug && debugLocks {
+		log.Printf(format, a...)
+	}
 }
