@@ -151,6 +151,7 @@ Loop:
 							// I won
 							debugStatef("\t%v.seekElection - elected!\n", rf.me)
 							rf.Leader = rf.me
+
 							rf.mu.Unlock()
 							debugLocksf("%v.seekElection - unlock 2\n", rf.me)
 							break Loop
