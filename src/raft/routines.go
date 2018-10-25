@@ -29,12 +29,7 @@ Loop:
 						// Don't send heartbeat to myself
 						continue
 					}
-
-					args := &ApplyMsgArgs{
-						Term:   rf.Term,
-						Leader: rf.Leader,
-					}
-					go rf.sendApplyMsg(peer, args)
+					go rf.sendApplyMsg(peer)
 				}
 			}
 		Unlock:
@@ -127,7 +122,7 @@ Loop:
 			rf.debugf(Locks, "seekElection - lock 2\n")
 			rf.mu.Lock()
 			{
-				rf.debugf(Unclassified, "seekElection - got response: { T:%v L:%v V:%v }\n", reply.Term, reply.Leader, reply.Vote)
+				rf.debugf(Unclassified, "seekElection - got response: { T:%v V:%v }\n", reply.Term, reply.Vote)
 				if rf.Term > electionTerm {
 					// Term advanced and Election ended
 					rf.mu.Unlock()
@@ -138,7 +133,6 @@ Loop:
 				if reply.Term > electionTerm {
 					// Peer has newer term
 					rf.Term = reply.Term
-					rf.Leader = reply.Leader
 					rf.Vote = -1
 
 					rf.mu.Unlock()
@@ -150,6 +144,13 @@ Loop:
 						votes++
 						if votes > len(rf.peers)/2 {
 							// I won
+							rf.PeerStates = make([]PeerState, len(rf.peers))
+							for peer := range rf.PeerStates {
+								rf.PeerStates[peer] = PeerState{
+									NextIndex:  len(rf.Entries),
+									MatchIndex: 0,
+								}
+							}
 							rf.Leader = rf.me
 
 							rf.debugf(Dump, "seekElection - elected!\n")

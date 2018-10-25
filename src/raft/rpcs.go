@@ -6,9 +6,8 @@ type RequestVoteArgs struct {
 }
 
 type RequestVoteReply struct {
-	Term   int
-	Leader int
-	Vote   int
+	Term int
+	Vote int
 }
 
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
@@ -27,7 +26,6 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 			// Canidate's term is NOT new
 		}
 		reply.Term = rf.Term
-		reply.Leader = rf.Leader
 		reply.Vote = rf.Vote
 	}
 	rf.mu.Unlock()
