@@ -202,6 +202,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	ctx, rf.killRoutines = context.WithCancel(context.Background())
 	go rf.sendHeartbeats(ctx)
 	go rf.watchTimeout(ctx)
+	go rf.reportLogs(ctx, applyCh)
 
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())

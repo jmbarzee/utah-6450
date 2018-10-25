@@ -180,3 +180,40 @@ Loop:
 
 	go emptyResponseChan(responseChan, len(rf.peers)-replies) // T
 }
+
+func (rf *Raft) reportLogs(ctx context.Context, applyCh chan ApplyMsg) {
+	rf.debugf(Routine, "reportLogs\n")
+	milliseconds := time.Duration(200)
+	ticker := time.NewTicker(milliseconds * time.Millisecond)
+	lastReported := -1
+
+Loop:
+	for {
+		select {
+		case <-ticker.C:
+			rf.debugf(Locks, "reportLogs - lock\n")
+			rf.mu.Lock()
+			{
+				bound := rf.CommitIndex
+				if bound > len(rf.Entries)-1 {
+					bound = len(rf.Entries) - 1
+				}
+				for i := lastReported + 1; i <= bound; i++ {
+					lastReported++
+					message := ApplyMsg{
+						Index:   i,
+						Command: rf.Entries[i].Command,
+					}
+
+					rf.debugf(Dump, "reportLogs - reporting {Index:%v}\n", message.Index)
+					applyCh <- message
+				}
+			}
+			rf.mu.Unlock()
+			rf.debugf(Locks, "reportLogs - unlock\n")
+		case <-ctx.Done():
+			close(applyCh) // TODO ensure we should be doing this
+			break Loop
+		}
+	}
+}
