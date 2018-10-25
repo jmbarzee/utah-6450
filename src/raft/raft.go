@@ -66,9 +66,9 @@ type Raft struct {
 }
 
 type Entry struct {
+	Term    int
 	Index   int
 	Command interface{}
-	Term    int
 }
 
 type PeerState struct {
@@ -142,13 +142,43 @@ func (rf *Raft) readPersist(data []byte) {
 // the leader.
 //
 func (rf *Raft) Start(command interface{}) (int, int, bool) {
-	index := -1
-	term := -1
-	isLeader := true
+	//rf.debugf(Routine, "Start\n")
+	amLeader := false
+	term := 0
+	index := 0
 
-	// Your code here (2B).
+	rf.debugf(Locks, "Start - lock\n")
+	rf.mu.Lock()
+	{
+		amLeader = (rf.Leader == rf.me)
+		if !amLeader {
+			goto Unlock
+		}
 
-	return index, term, isLeader
+		rf.debugf(Dump, "Start - command:%v\n", command)
+		term = rf.Term
+		index = len(rf.Entries)
+
+		newEntry := Entry{
+			Index:   index,
+			Command: command,
+			Term:    term,
+		}
+		rf.Entries = append(rf.Entries, newEntry)
+
+		for peer := range rf.peers {
+			if peer == rf.me {
+				// Don't send heartbeat to myself
+				continue
+			}
+			go rf.sendApplyMsg(peer)
+		}
+	}
+Unlock:
+	rf.mu.Unlock()
+	rf.debugf(Locks, "Start - unlock\n", rf.me)
+
+	return index, term, amLeader
 }
 
 func (rf *Raft) Kill() {

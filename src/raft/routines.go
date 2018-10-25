@@ -96,8 +96,10 @@ func (rf *Raft) seekElection(ctx context.Context) {
 		rf.Vote = rf.me
 		votes++
 		args := &RequestVoteArgs{
-			Term:     rf.Term,
-			Canidate: rf.me,
+			Term:         rf.Term,
+			Canidate:     rf.me,
+			LastLogIndex: len(rf.Entries) - 1,
+			LastLogTerm:  rf.Entries[len(rf.Entries)-1].Term,
 		}
 
 		// Ask for votes
@@ -122,7 +124,7 @@ Loop:
 			rf.debugf(Locks, "seekElection - lock 2\n")
 			rf.mu.Lock()
 			{
-				rf.debugf(Unclassified, "seekElection - got response: { T:%v V:%v }\n", reply.Term, reply.Vote)
+				rf.debugf(Unclassified, "seekElection - got response: { T:%v V:%v }\n", reply.Term, reply.VoteGranted)
 				if rf.Term > electionTerm {
 					// Term advanced and Election ended
 					rf.mu.Unlock()
@@ -140,7 +142,7 @@ Loop:
 					break Loop
 
 				} else if reply.Term == electionTerm {
-					if reply.Vote == rf.me {
+					if reply.VoteGranted {
 						votes++
 						if votes > len(rf.peers)/2 {
 							// I won
@@ -178,8 +180,6 @@ Loop:
 			break Loop
 		}
 	}
-
-	go emptyResponseChan(responseChan, len(rf.peers)-replies) // T
 }
 
 func (rf *Raft) reportLogs(ctx context.Context, applyCh chan ApplyMsg) {
@@ -206,7 +206,7 @@ Loop:
 						Command: rf.Entries[i].Command,
 					}
 
-					rf.debugf(Dump, "reportLogs - reporting {Index:%v}\n", message.Index)
+					//rf.debugf(Dump, "reportLogs - reporting {Index:%v}\n", message.Index)
 					applyCh <- message
 				}
 			}

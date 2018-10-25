@@ -3,11 +3,14 @@ package raft
 type RequestVoteArgs struct {
 	Term     int
 	Canidate int
+
+	LastLogIndex int
+	LastLogTerm  int
 }
 
 type RequestVoteReply struct {
-	Term int
-	Vote int
+	Term        int
+	VoteGranted bool
 }
 
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
@@ -16,47 +19,78 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	rf.mu.Lock()
 	{
 		rf.debugf(Dump, "RequestVote\n")
+
 		if args.Term > rf.Term {
-			// Vote for canidate
+			rf.debugf(State, "RequestVote - State Change 1\n\t{%v %v %v %v} -> {%v %v %v %v}\n",
+				rf.Term, rf.Leader, rf.Vote, rf.CommitIndex,
+				args.Term, -1, args.Canidate, rf.CommitIndex)
 			rf.Term = args.Term
 			rf.Leader = -1
 			rf.Vote = args.Canidate
 			rf.recentHeartbeat = true
+			reply.VoteGranted = true
+
+		} else if args.Term == rf.Term {
+			if rf.Vote == -1 || rf.Vote == args.Canidate {
+				if rf.Leader == -1 || rf.Leader == args.Canidate {
+					// TODO check log completeness
+					rf.debugf(State, "RequestVote - State Change 2\n\t{%v %v %v %v} -> {%v %v %v %v}\n",
+						rf.Term, rf.Leader, rf.Vote, rf.CommitIndex,
+						args.Term, -1, args.Canidate, rf.CommitIndex)
+					rf.Vote = args.Canidate
+					rf.recentHeartbeat = true
+					reply.VoteGranted = true
+
+				} else {
+					// Have a leader but haven't voted
+					rf.fatalf("RequestVote - Have a leader(%v) but haven't voted!", rf.Leader)
+				}
+
+			} else {
+				// Voted for someone else. Do nothing
+				reply.VoteGranted = false
+			}
 		} else {
-			// Canidate's term is NOT new
+			// Old Term. Do nothing
+			reply.VoteGranted = false
 		}
+
 		reply.Term = rf.Term
-		reply.Vote = rf.Vote
 	}
 	rf.mu.Unlock()
 	rf.debugf(Locks, "RequestVote - unlock\n")
+
+	rf.debugf(Message, "RequestVote  Reply:\n\tTerm:%v VoteGranted:%v\n",
+		reply.Term, reply.VoteGranted)
 }
 
 func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, responseChan chan *RequestVoteReply) {
-	rf.debugf(Routine, "sendRequestVote -> %v\n", server)
+	//rf.debugf(Routine, "sendRequestVote -> %v\n", server)
 	reply := &RequestVoteReply{}
+	rf.debugf(Message, "sendRequestVote -> %v  Args:\n\tTerm:%v Cand:%v LastIndex:%v LastTerm:%v \n", server,
+		args.Term, args.Canidate, args.LastLogIndex, args.LastLogTerm)
 	ok := rf.peers[server].Call("Raft.RequestVote", args, reply)
 	if ok {
 		responseChan <- reply
+	} else {
+		go rf.sendRequestVote(server, args, responseChan)
 	}
-}
-
-func emptyResponseChan(responseChan chan *RequestVoteReply, remaining int) {
-	for i := 0; i < remaining; i++ {
-		<-responseChan
-	}
-	close(responseChan)
 }
 
 type ApplyMsgArgs struct {
 	Term   int
 	Leader int
-	// TODO add msg
+
+	PrevLogIndex int
+	PrevLogTerm  int
+
+	Entries     []Entry
+	CommitIndex int
 }
 
 type ApplyMsgReply struct {
-	Term   int
-	Leader int
+	Term    int
+	Success bool
 }
 
 func (rf *Raft) ApplyMsg(args *ApplyMsgArgs, reply *ApplyMsgReply) {
@@ -67,48 +101,189 @@ func (rf *Raft) ApplyMsg(args *ApplyMsgArgs, reply *ApplyMsgReply) {
 		rf.debugf(Dump, "ApplyMsg\n")
 
 		if args.Term > rf.Term {
-			// Leader is in newer term (and has a new message?)
+			rf.debugf(State, "ApplyMsg - State Change 1\n\t{%v %v %v %v} -> {%v %v %v %v}\n",
+				rf.Term, rf.Leader, rf.Vote, rf.CommitIndex,
+				args.Term, args.Leader, -1, rf.CommitIndex)
 			rf.Term = args.Term
 			rf.Leader = args.Leader
-			rf.Vote = -1
-
 			rf.recentHeartbeat = true
+			// TODO Handle	PrevLogIndex, PrevLogTerm, Entries, CommitIndex
+			reply.Success = true
 
 		} else if args.Term == rf.Term {
-			// Leader won election
-			rf.Leader = args.Leader
-			rf.recentHeartbeat = true
+			if rf.Leader == args.Leader || rf.Leader == -1 {
+				rf.debugf(State, "ApplyMsg - State Change 2\n\t{%v %v %v %v} -> {%v %v %v %v}\n",
+					rf.Term, rf.Leader, rf.Vote, rf.CommitIndex,
+					args.Term, args.Leader, -1, rf.CommitIndex)
+				rf.recentHeartbeat = true
+				// TODO Handle	PrevLogIndex, PrevLogTerm, Entries, CommitIndex
+				reply.Success = true
 
+			} else {
+				// Discovered two leaders. Fail!
+				rf.fatalf("ApplyMsg - Two Leaders in same Term!!! mine:%v other:%v", rf.Leader, args.Leader)
+
+			}
 		} else {
-			// Requester is old leader
+			// Old Term, Do nothing
+			reply.Success = false
 		}
 		reply.Term = rf.Term
-		reply.Leader = rf.Leader
+
+		// if args.Term >= rf.Term {
+		// 	// Check for new log/message
+		// 	rf.debugf(Message, "ApplyMsg - len(rf.Entries):%v args.PrevLogIndex:%v\n", len(rf.Entries), args.PrevLogIndex)
+		// 	if len(rf.Entries)-1 < args.PrevLogIndex {
+		// 		// Need previous logs
+		// 		rf.debugf(Message, "ApplyMsg - Need previous logs self:{%v %v} args:{%v %v}\n",
+		// 			len(rf.Entries),
+		// 			"?",
+		// 			args.PrevLogIndex,
+		// 			args.PrevLogTerm)
+		// 		reply.Success = false
+
+		// 	} else if args.PrevLogTerm != rf.Entries[args.PrevLogIndex].Term {
+		// 		// Old logs don't match terms
+		// 		rf.debugf(Message, "ApplyMsg - Old logs don't match terms self:{%v %v} args:{%v %v}\n",
+		// 			len(rf.Entries),
+		// 			rf.Entries[args.PrevLogIndex].Term,
+		// 			args.PrevLogIndex,
+		// 			args.PrevLogTerm)
+		// 		reply.Success = false
+
+		// 	} else {
+		// 		// Choke down new Logs
+		// 		rf.debugf(Dump, "ApplyMsg - accepting new logs self:{%v %v} args:{%v %v}\n",
+		// 			len(rf.Entries),
+		// 			rf.Entries[args.PrevLogIndex].Term,
+		// 			args.PrevLogIndex,
+		// 			args.PrevLogTerm,
+		// 		)
+		// 		rf.CommitIndex = args.CommitIndex
+		// 		rf.Entries = append(rf.Entries[0:args.PrevLogIndex+1], args.Entries...)
+
+		// 	}
+		// }
 	}
 	rf.mu.Unlock()
 	rf.debugf(Locks, "ApplyMsg - lock\n")
+
+	rf.debugf(Message, "ApplyMsg  Reply:\n\tTerm:%v Success:%v\n",
+		reply.Term, reply.Success)
 }
 
-func (rf *Raft) sendApplyMsg(server int, args *ApplyMsgArgs) {
-	reply := &ApplyMsgReply{}
-	ok := rf.peers[server].Call("Raft.ApplyMsg", args, reply)
-
-	if !ok {
+func (rf *Raft) sendApplyMsg(server int) {
 	// rf.debugf(Routine, "sendApplyMsg -> %v\n", server)
+	if rf.Leader != rf.me {
 		return
 	}
 
-	rf.mu.Lock()
+	args := &ApplyMsgArgs{}
+	reply := &ApplyMsgReply{}
+
 	rf.debugf(Locks, "sendApplyMsg - peer.%v.lock\n", server)
+	peerState := &rf.PeerStates[server]
+	peerState.Lock()
 	{
-		if reply.Term > rf.Term {
-			// Peer is in newer term
-			rf.Term = args.Term
-			rf.Leader = args.Leader
-			rf.Vote = -1
-		} else {
-			// peer is up to date
+		rf.debugf(Locks, "sendApplyMsg - lock\n")
+		rf.mu.Lock()
+		{
+			//rf.debugf(Dump, "sendApplyMsg -> %v\n", server)
+			// nextIndex := rf.PeerStates[server].NextIndex
+			// if nextIndex < 1 {
+			// 	rf.debugf(Message, "sendApplyMsg -> %v  NextIndex out of bounds!!! %v < 0 \n", server, nextIndex)
+			// 	nextIndex = 1
+			// }
+			// if nextIndex > len(rf.Entries) {
+			// 	// nextIndex > len(rf.Entries) - 1  is a heartbeat and should be handled normally
+			// 	rf.debugf(Message, "sendApplyMsg -> %v  NextIndex out of bounds!!! %v > %v\n", server, nextIndex, len(rf.Entries))
+			// 	nextIndex = len(rf.Entries)
+			// }
+
+			args.Term = rf.Term
+			args.Leader = rf.Leader
+
+			// args.PrevLogIndex = nextIndex - 1
+			// args.PrevLogTerm = rf.Entries[nextIndex-1].Term
+			// args.CommitIndex = rf.CommitIndex
+
+			// if nextIndex < len(rf.Entries) {
+			// 	args.Entries = rf.Entries[nextIndex:len(rf.Entries)]
+			// } else {
+			// 	args.Entries = make([]Entry, 0)
+			// }
 		}
+		rf.mu.Unlock()
+		rf.debugf(Locks, "sendApplyMsg - unlock\n")
+
+		rf.debugf(Message, "sendApplyMsg -> %v  Args:\n\tTerm:%v Lead:%v PrevIndex:%v PrevTerm:%v CommitIndex:%v \n\t%v\n", server,
+			args.Term, args.Leader, args.PrevLogIndex, args.PrevLogTerm, args.CommitIndex,
+			entriesToString(args.Entries))
+		ok := rf.peers[server].Call("Raft.ApplyMsg", args, reply)
+
+		if !ok {
+			goto Unlock
+		}
+
+		rf.debugf(Locks, "sendApplyMsg - lock 2\n")
+		rf.mu.Lock()
+		{
+			if reply.Success {
+				if reply.Term == rf.Term {
+					// Peer has matching term
+					// if reply.Success {
+					// 	// Peer added new log
+					// 	rf.PeerStates[server].NextIndex = len(rf.Entries)
+					// 	rf.debugf(Unclassified, "sendApplyMsg -> %v - Set %v.NextIndex: %v", server, server, rf.PeerStates[server].NextIndex)
+					// 	rf.PeerStates[server].MatchIndex = rf.PeerStates[server].NextIndex - 1
+
+					// 	couldAdvCommitIndex := true
+					// 	for couldAdvCommitIndex {
+					// 		confirmed := 1
+					// 		couldAdvCommitIndex = false
+					// 		for peer, state := range rf.PeerStates {
+					// 			if peer == rf.me {
+					// 				continue
+					// 			}
+					// 			if state.MatchIndex > rf.CommitIndex {
+					// 				confirmed++
+					// 			}
+					// 		}
+					// 		if confirmed > len(rf.peers)/2 {
+					// 			rf.CommitIndex++
+					// 			couldAdvCommitIndex = true
+					// 		}
+					// 	}
+
+				} else {
+					// Terms Don't Match. Could we have advanced ours?
+					rf.debugf(State, "sendApplyMsg -> %v  Success with unmatching terms? mine:%v other:%v\n", server, rf.Term, reply.Term)
+				}
+
+			} else {
+				if reply.Term > rf.Term {
+					rf.debugf(State, "sendApplyMsg - State Change\n\t{%v %v %v %v} -> {%v %v %v %v}\n",
+						rf.Term, rf.Leader, rf.Vote, rf.CommitIndex,
+						reply.Term, -1, -1, rf.CommitIndex)
+					rf.Term = reply.Term
+
+				} else if reply.Term == rf.Term {
+					// 	// Peer needs previous
+					// 	rf.PeerStates[server].NextIndex--
+					// 	rf.debugf(Message, "sendApplyMsg -> %v failed, NextIndex:%v\n", server, rf.PeerStates[server].NextIndex)
+					// 	go rf.sendApplyMsg(server)
+				} else {
+					// Reply term is behind? Peer did something wrong
+					rf.fatalf("sendApplyMsg -> %v  Failure with unmatching terms? mine:%v other:%v\n", server, rf.Term, reply.Term)
+				}
+
+			}
+		}
+		rf.mu.Unlock()
+		rf.debugf(Locks, "sendApplyMsg - unlock 2\n")
+
+	Unlock:
 	}
-	rf.mu.Unlock()
+	peerState.Unlock()
+	rf.debugf(Locks, "sendApplyMsg - peer.%v.Unlock\n", server)
 }
