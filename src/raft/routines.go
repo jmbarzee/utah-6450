@@ -7,7 +7,7 @@ import (
 )
 
 func (rf *Raft) sendHeartbeats(ctx context.Context) {
-	dumpState("sendHeartbeats", rf)
+	rf.debugf(Routine, "sendHeartbeats\n")
 	milliseconds := time.Duration(rand.Int63n(100) + 100)
 	ticker := time.NewTicker(milliseconds * time.Millisecond)
 
@@ -15,7 +15,7 @@ Loop:
 	for {
 		select {
 		case <-ticker.C:
-			debugLocksf("%v.sendHeartbeats - lock\n", rf.me)
+			rf.debugf(Locks, "sendHeartbeats - lock\n")
 			rf.mu.Lock()
 			{
 				if rf.Leader != rf.me {
@@ -39,7 +39,7 @@ Loop:
 			}
 		Unlock:
 			rf.mu.Unlock()
-			debugLocksf("%v.sendHeartbeats - unlock\n", rf.me)
+			rf.debugf(Locks, "sendHeartbeats - unlock\n")
 
 		case <-ctx.Done():
 			break Loop
@@ -48,7 +48,7 @@ Loop:
 }
 
 func (rf *Raft) watchTimeout(ctx context.Context) {
-	dumpState("watchTimeout", rf)
+	rf.debugf(Routine, "watchTimeout\n")
 	milliseconds := time.Duration(rand.Int63n(200) + 200)
 	ticker := time.NewTicker(milliseconds * time.Millisecond)
 
@@ -56,7 +56,7 @@ Loop:
 	for {
 		select {
 		case <-ticker.C:
-			debugLocksf("%v.watchTimeout - lock\n", rf.me)
+			rf.debugf(Locks, "watchTimeout - lock\n")
 			rf.mu.Lock()
 			{
 				if rf.Leader == rf.me {
@@ -76,7 +76,7 @@ Loop:
 			}
 		Unlock:
 			rf.mu.Unlock()
-			debugLocksf("%v.watchTimeout - unlock\n", rf.me)
+			rf.debugf(Locks, "watchTimeout - unlock\n")
 
 		case <-ctx.Done():
 			break Loop
@@ -85,15 +85,16 @@ Loop:
 }
 
 func (rf *Raft) seekElection(ctx context.Context) {
-	dumpState("seekElection", rf)
+	// rf.debugf(Routine, "seekElection\n")
 	responseChan := make(chan *RequestVoteReply)
 	var electionTerm int
 	votes := 0
 	replies := 0
 
-	debugLocksf("%v.seekElection - lock 1\n", rf.me)
+	rf.debugf(Locks, "seekElection - lock 1\n")
 	rf.mu.Lock()
 	{
+		rf.debugf(Dump, "seekElection\n")
 		// Prep for vote
 		rf.Term++
 		electionTerm = rf.Term
@@ -115,7 +116,7 @@ func (rf *Raft) seekElection(ctx context.Context) {
 		}
 	}
 	rf.mu.Unlock()
-	debugLocksf("%v.seekElection - unlock 1\n", rf.me)
+	rf.debugf(Locks, "seekElection - unlock 1\n")
 
 Loop:
 	for {
@@ -123,14 +124,14 @@ Loop:
 		case reply := <-responseChan:
 			replies++
 
-			debugLocksf("%v.seekElection - lock 2\n", rf.me)
+			rf.debugf(Locks, "seekElection - lock 2\n")
 			rf.mu.Lock()
 			{
-				debugStatef("\t%v.seekElection - got vote: { T:%v L:%v V:%v }\n", rf.me, reply.Term, reply.Leader, reply.Vote)
+				rf.debugf(Unclassified, "seekElection - got response: { T:%v L:%v V:%v }\n", reply.Term, reply.Leader, reply.Vote)
 				if rf.Term > electionTerm {
 					// Term advanced and Election ended
 					rf.mu.Unlock()
-					debugLocksf("%v.seekElection - unlock 2\n", rf.me)
+					rf.debugf(Locks, "seekElection - unlock 2\n")
 					break Loop
 				}
 
@@ -141,7 +142,7 @@ Loop:
 					rf.Vote = -1
 
 					rf.mu.Unlock()
-					debugLocksf("%v.seekElection - unlock 2\n", rf.me)
+					rf.debugf(Locks, "seekElection - unlock 2\n")
 					break Loop
 
 				} else if reply.Term == electionTerm {
@@ -149,18 +150,19 @@ Loop:
 						votes++
 						if votes > len(rf.peers)/2 {
 							// I won
-							debugStatef("\t%v.seekElection - elected!\n", rf.me)
 							rf.Leader = rf.me
 
+							rf.debugf(Dump, "seekElection - elected!\n")
+
 							rf.mu.Unlock()
-							debugLocksf("%v.seekElection - unlock 2\n", rf.me)
+							rf.debugf(Locks, "seekElection - unlock 2\n")
 							break Loop
 						}
 
 					} else if replies-votes > len(rf.peers)/2 {
 						// I can't win the vote
 						rf.mu.Unlock()
-						debugLocksf("%v.seekElection - unlock 2\n", rf.me)
+						rf.debugf(Locks, "seekElection - unlock 2\n")
 						break Loop
 
 					}
@@ -169,7 +171,7 @@ Loop:
 				}
 			}
 			rf.mu.Unlock() // Warning, super dirty
-			debugLocksf("%v.seekElection - unlock 2\n", rf.me)
+			rf.debugf(Locks, "seekElection - unlock 2\n")
 
 		case <-ctx.Done():
 			break Loop

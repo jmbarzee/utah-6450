@@ -1,38 +1,86 @@
 package raft
 
-import "log"
+import (
+	"fmt"
+	"log"
+)
 
 // Debugging
 const (
-	debug      = false
-	debugState = true
-	debugLocks = false
+	Dump         = "Dump"
+	Routine      = "Routine"
+	Locks        = "Locks"
+	Message      = "Message"
+	Unclassified = "Unclassified"
 )
 
-func debugf(format string, a ...interface{}) {
-	if debug {
-		log.Printf(format, a...)
+// WARNING! catagory="Dump" assumes that caller holds the lock
+func (rf *Raft) debugf(catagory, format string, a ...interface{}) {
+	const (
+		debug = true
+
+		debugDump         = true
+		debugRoutine      = true
+		debugLocks        = false
+		debugMessage      = true
+		debugUnclassified = true
+	)
+
+	const dumpMessage = `		Term:%v Lead:%v Vote:%v Commit:%v
+		Entries: %v
+		PeerStates: %v
+`
+
+	if !debug {
+		return
+	}
+
+	switch catagory {
+	case Dump:
+		if debugDump {
+			entries := entriesToString(rf.Entries)
+			states := statesToString(rf.PeerStates)
+			rf.logf(format+dumpMessage, append(a, rf.Term, rf.Leader, rf.Vote, rf.CommitIndex, entries, states)...)
+		}
+	case Routine:
+		if debugRoutine {
+			rf.logf(format, a...)
+		}
+	case Locks:
+		if debugLocks {
+			rf.logf(format, a...)
+		}
+	case Message:
+		if debugMessage {
+			rf.logf(format, a...)
+		}
+	case Unclassified:
+		if debugUnclassified {
+			rf.logf(format, a...)
+		}
 	}
 }
 
-func debugStatef(format string, a ...interface{}) {
-	if debug && debugState {
-		log.Printf(format, a...)
-	}
+func (rf *Raft) logf(format string, a ...interface{}) {
+	args := make([]interface{}, 1)
+	args[0] = rf.me
+	args = append(args, a...)
+	log.Printf("%v."+format, args...)
 }
 
-func dumpState(context string, rf *Raft) {
-	//debugLocksf("%v.dumpState - waiting\n", rf.me)
-	rf.mu.Lock()
-	{
-		debugStatef("%v.%v - { T:%v L:%v V:%v }\n", rf.me, context, rf.Term, rf.Leader, rf.Vote)
+func entriesToString(entries []Entry) string {
+	entryString := "{ "
+	for _, entry := range entries {
+		entryString += fmt.Sprintf("{%v %v %v} ", entry.Index, entry.Term, entry.Command)
 	}
-	rf.mu.Unlock()
-	//debugLocksf("%v.dumpState - freed\n", rf.me)
+	entryString += "}"
+	return entryString
 }
-
-func debugLocksf(format string, a ...interface{}) {
-	if debug && debugLocks {
-		log.Printf(format, a...)
+func statesToString(states []PeerState) string {
+	statesString := "{ "
+	for _, state := range states {
+		statesString += fmt.Sprintf("{Nxt:%v Mtc:%v} ", state.NextIndex, state.MatchIndex)
 	}
+	statesString += "}"
+	return statesString
 }

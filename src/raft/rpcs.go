@@ -12,10 +12,11 @@ type RequestVoteReply struct {
 }
 
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
-	dumpState("RequestVote", rf)
-	debugLocksf("%v.RequestVote - lock\n", rf.me)
+	// rf.debugf(Routine, "RequestVote\n")
+	rf.debugf(Locks, "RequestVote - lock\n")
 	rf.mu.Lock()
 	{
+		rf.debugf(Dump, "RequestVote\n")
 		if args.Term > rf.Term {
 			// Vote for canidate
 			rf.Term = args.Term
@@ -23,17 +24,18 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 			rf.Vote = args.Canidate
 			rf.recentHeartbeat = true
 		} else {
-			// Canidate's term is not new
+			// Canidate's term is NOT new
 		}
 		reply.Term = rf.Term
 		reply.Leader = rf.Leader
 		reply.Vote = rf.Vote
 	}
 	rf.mu.Unlock()
-	debugLocksf("%v.RequestVote - unlock\n", rf.me)
+	rf.debugf(Locks, "RequestVote - unlock\n")
 }
 
 func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, responseChan chan *RequestVoteReply) {
+	rf.debugf(Routine, "sendRequestVote -> %v\n", server)
 	reply := &RequestVoteReply{}
 	ok := rf.peers[server].Call("Raft.RequestVote", args, reply)
 	if ok {
@@ -60,15 +62,18 @@ type ApplyMsgReply struct {
 }
 
 func (rf *Raft) ApplyMsg(args *ApplyMsgArgs, reply *ApplyMsgReply) {
-	dumpState("ApplyMsg", rf)
-	debugLocksf("%v.ApplyMsg - lock\n", rf.me)
+	//rf.debugf(Routine, "ApplyMsg\n")
+	rf.debugf(Locks, "ApplyMsg - lock\n")
 	rf.mu.Lock()
 	{
+		rf.debugf(Dump, "ApplyMsg\n")
+
 		if args.Term > rf.Term {
-			// Leader is in newer term
+			// Leader is in newer term (and has a new message?)
 			rf.Term = args.Term
 			rf.Leader = args.Leader
 			rf.Vote = -1
+
 			rf.recentHeartbeat = true
 
 		} else if args.Term == rf.Term {
@@ -77,13 +82,13 @@ func (rf *Raft) ApplyMsg(args *ApplyMsgArgs, reply *ApplyMsgReply) {
 			rf.recentHeartbeat = true
 
 		} else {
-			// Leader is in old term
+			// Requester is old leader
 		}
 		reply.Term = rf.Term
 		reply.Leader = rf.Leader
 	}
 	rf.mu.Unlock()
-	debugLocksf("%v.ApplyMsg - unlock\n", rf.me)
+	rf.debugf(Locks, "ApplyMsg - lock\n")
 }
 
 func (rf *Raft) sendApplyMsg(server int, args *ApplyMsgArgs) {
@@ -91,12 +96,12 @@ func (rf *Raft) sendApplyMsg(server int, args *ApplyMsgArgs) {
 	ok := rf.peers[server].Call("Raft.ApplyMsg", args, reply)
 
 	if !ok {
+	// rf.debugf(Routine, "sendApplyMsg -> %v\n", server)
 		return
 	}
 
-	dumpState("sendApplyMsg", rf)
-	debugLocksf("%v.sendApplyMsg - lock\n", rf.me)
 	rf.mu.Lock()
+	rf.debugf(Locks, "sendApplyMsg - peer.%v.lock\n", server)
 	{
 		if reply.Term > rf.Term {
 			// Peer is in newer term
@@ -108,5 +113,4 @@ func (rf *Raft) sendApplyMsg(server int, args *ApplyMsgArgs) {
 		}
 	}
 	rf.mu.Unlock()
-	debugLocksf("%v.sendApplyMsg - unlock\n", rf.me)
 }

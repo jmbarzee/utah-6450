@@ -18,9 +18,8 @@ package raft
 //
 
 import (
-	"sync"
-
 	"context"
+	"sync"
 
 	"cs6450.utah.systems/u1177988/labs/src/labrpc"
 )
@@ -56,9 +55,27 @@ type Raft struct {
 	Term   int
 	Leader int
 
+	CommitIndex int
+
+	Entries    []Entry
+	PeerStates []PeerState
+
 	recentHeartbeat bool
 
 	killRoutines context.CancelFunc
+}
+
+type Entry struct {
+	Index   int
+	Command interface{}
+	Term    int
+}
+
+type PeerState struct {
+	NextIndex  int
+	MatchIndex int
+
+	sync.Mutex // Lock to protect shared access to this peer's state
 }
 
 // return currentTerm and whether this server
@@ -135,7 +152,14 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 }
 
 func (rf *Raft) Kill() {
-	debugStatef("\t%v.Kill\n", rf.me)
+	//rf.debugf(Locks, "Kill - lock\n")
+	rf.mu.Lock()
+	{
+		rf.debugf(Dump, "Kill\n")
+	}
+	rf.mu.Unlock()
+	//rf.debugf(Locks, "Kill - unlock\n", rf.me)
+
 	rf.killRoutines()
 }
 
@@ -161,6 +185,17 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.Term = 0
 	rf.Leader = -1
 	rf.Vote = -1
+
+	rf.Entries = []Entry{
+		Entry{
+			Index:   0,
+			Command: 0,
+			Term:    0,
+		},
+	}
+
+	rf.PeerStates = make([]PeerState, 0)
+
 	rf.recentHeartbeat = false
 
 	var ctx context.Context
