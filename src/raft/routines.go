@@ -29,7 +29,7 @@ Loop:
 						// Don't send heartbeat to myself
 						continue
 					}
-					go rf.sendApplyMsg(peer)
+					go rf.doApplyMsg(peer)
 				}
 			}
 		Unlock:

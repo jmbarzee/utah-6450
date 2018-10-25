@@ -22,6 +22,7 @@ const (
 	State        = "State"
 	PeerStates   = "PeerStates"
 	Locks        = "Locks"
+	PeerLocks    = "PeerLocks"
 	Message      = "Message"
 	Unclassified = "Unclassified"
 )
@@ -29,13 +30,14 @@ const (
 // WARNING! catagory="Dump" assumes that caller holds the lock
 func (rf *Raft) debugf(catagory, format string, a ...interface{}) {
 	const (
-		debug = true
+		debug = false
 
 		debugDump         = true
 		debugRoutine      = true
 		debugState        = true
 		debugPeerStates   = true
 		debugLocks        = false
+		debugPeerLocks    = false
 		debugMessage      = true
 		debugUnclassified = true
 	)
@@ -70,6 +72,10 @@ func (rf *Raft) debugf(catagory, format string, a ...interface{}) {
 		}
 	case Locks:
 		if debugLocks {
+			rf.logf(format, a...)
+		}
+	case PeerLocks:
+		if debugPeerLocks {
 			rf.logf(format, a...)
 		}
 	case Message:

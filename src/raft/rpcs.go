@@ -1,5 +1,9 @@
 package raft
 
+import (
+	"time"
+)
+
 type RequestVoteArgs struct {
 	Term     int
 	Canidate int
@@ -106,6 +110,7 @@ func (rf *Raft) ApplyMsg(args *ApplyMsgArgs, reply *ApplyMsgReply) {
 				args.Term, args.Leader, -1, rf.CommitIndex)
 			rf.Term = args.Term
 			rf.Leader = args.Leader
+			rf.Vote = -1
 			rf.recentHeartbeat = true
 			// TODO Handle	PrevLogIndex, PrevLogTerm, Entries, CommitIndex
 			reply.Success = true
@@ -114,7 +119,8 @@ func (rf *Raft) ApplyMsg(args *ApplyMsgArgs, reply *ApplyMsgReply) {
 			if rf.Leader == args.Leader || rf.Leader == -1 {
 				rf.debugf(State, "ApplyMsg - State Change 2\n\t{%v %v %v %v} -> {%v %v %v %v}\n",
 					rf.Term, rf.Leader, rf.Vote, rf.CommitIndex,
-					args.Term, args.Leader, -1, rf.CommitIndex)
+					args.Term, args.Leader, rf.Vote, rf.CommitIndex)
+				rf.Leader = args.Leader
 				rf.recentHeartbeat = true
 				// TODO Handle	PrevLogIndex, PrevLogTerm, Entries, CommitIndex
 				reply.Success = true
@@ -172,16 +178,27 @@ func (rf *Raft) ApplyMsg(args *ApplyMsgArgs, reply *ApplyMsgReply) {
 		reply.Term, reply.Success)
 }
 
-func (rf *Raft) sendApplyMsg(server int) {
+func (rf *Raft) sendApplyMessage(server int, args *ApplyMsgArgs, responseChan chan *ApplyMsgReply) {
+	//rf.debugf(Routine, "sendApplyMessage -> %v\n", server)
+	reply := &ApplyMsgReply{}
+	rf.debugf(Message, "sendApplyMsg -> %v  Args:\n\tTerm:%v Lead:%v PrevIndex:%v PrevTerm:%v CommitIndex:%v \n\t%v\n", server,
+		args.Term, args.Leader, args.PrevLogIndex, args.PrevLogTerm, args.CommitIndex,
+		entriesToString(args.Entries))
+	ok := rf.peers[server].Call("Raft.ApplyMsg", args, reply)
+	if ok {
+		responseChan <- reply
+	}
+}
+
+func (rf *Raft) doApplyMsg(server int) {
 	// rf.debugf(Routine, "sendApplyMsg -> %v\n", server)
 	if rf.Leader != rf.me {
 		return
 	}
 
 	args := &ApplyMsgArgs{}
-	reply := &ApplyMsgReply{}
 
-	rf.debugf(Locks, "sendApplyMsg - peer.%v.lock\n", server)
+	rf.debugf(PeerLocks, "sendApplyMsg - peer.%v.lock\n", server)
 	peerState := &rf.PeerStates[server]
 	peerState.Lock()
 	{
@@ -216,74 +233,76 @@ func (rf *Raft) sendApplyMsg(server int) {
 		rf.mu.Unlock()
 		rf.debugf(Locks, "sendApplyMsg - unlock\n")
 
-		rf.debugf(Message, "sendApplyMsg -> %v  Args:\n\tTerm:%v Lead:%v PrevIndex:%v PrevTerm:%v CommitIndex:%v \n\t%v\n", server,
-			args.Term, args.Leader, args.PrevLogIndex, args.PrevLogTerm, args.CommitIndex,
-			entriesToString(args.Entries))
-		ok := rf.peers[server].Call("Raft.ApplyMsg", args, reply)
+		responseChan := make(chan *ApplyMsgReply)
+		timer := time.NewTimer(time.Millisecond * 100)
 
-		if !ok {
-			goto Unlock
-		}
+		go rf.sendApplyMessage(server, args, responseChan)
 
-		rf.debugf(Locks, "sendApplyMsg - lock 2\n")
-		rf.mu.Lock()
-		{
-			if reply.Success {
-				if reply.Term == rf.Term {
-					// Peer has matching term
-					// if reply.Success {
-					// 	// Peer added new log
-					// 	rf.PeerStates[server].NextIndex = len(rf.Entries)
-					// 	rf.debugf(Unclassified, "sendApplyMsg -> %v - Set %v.NextIndex: %v", server, server, rf.PeerStates[server].NextIndex)
-					// 	rf.PeerStates[server].MatchIndex = rf.PeerStates[server].NextIndex - 1
+		select {
+		case reply := <-responseChan:
+			rf.debugf(Locks, "sendApplyMsg - lock 2\n")
+			rf.mu.Lock()
+			{
+				if reply.Success {
+					if reply.Term == rf.Term {
+						// Peer has matching term
+						// if reply.Success {
+						// 	// Peer added new log
+						// 	rf.PeerStates[server].NextIndex = len(rf.Entries)
+						// 	rf.debugf(Unclassified, "sendApplyMsg -> %v - Set %v.NextIndex: %v", server, server, rf.PeerStates[server].NextIndex)
+						// 	rf.PeerStates[server].MatchIndex = rf.PeerStates[server].NextIndex - 1
 
-					// 	couldAdvCommitIndex := true
-					// 	for couldAdvCommitIndex {
-					// 		confirmed := 1
-					// 		couldAdvCommitIndex = false
-					// 		for peer, state := range rf.PeerStates {
-					// 			if peer == rf.me {
-					// 				continue
-					// 			}
-					// 			if state.MatchIndex > rf.CommitIndex {
-					// 				confirmed++
-					// 			}
-					// 		}
-					// 		if confirmed > len(rf.peers)/2 {
-					// 			rf.CommitIndex++
-					// 			couldAdvCommitIndex = true
-					// 		}
-					// 	}
+						// 	couldAdvCommitIndex := true
+						// 	for couldAdvCommitIndex {
+						// 		confirmed := 1
+						// 		couldAdvCommitIndex = false
+						// 		for peer, state := range rf.PeerStates {
+						// 			if peer == rf.me {
+						// 				continue
+						// 			}
+						// 			if state.MatchIndex > rf.CommitIndex {
+						// 				confirmed++
+						// 			}
+						// 		}
+						// 		if confirmed > len(rf.peers)/2 {
+						// 			rf.CommitIndex++
+						// 			couldAdvCommitIndex = true
+						// 		}
+						// 	}
+
+					} else {
+						// Terms Don't Match. Could we have advanced ours?
+						rf.debugf(State, "sendApplyMsg -> %v  Success with unmatching terms? mine:%v other:%v\n", server, rf.Term, reply.Term)
+					}
 
 				} else {
-					// Terms Don't Match. Could we have advanced ours?
-					rf.debugf(State, "sendApplyMsg -> %v  Success with unmatching terms? mine:%v other:%v\n", server, rf.Term, reply.Term)
+					if reply.Term > rf.Term {
+						rf.debugf(State, "sendApplyMsg - State Change\n\t{%v %v %v %v} -> {%v %v %v %v}\n",
+							rf.Term, rf.Leader, rf.Vote, rf.CommitIndex,
+							reply.Term, -1, -1, rf.CommitIndex)
+						rf.Term = reply.Term
+						rf.Leader = -1
+						rf.Vote = -1
+
+					} else if reply.Term == rf.Term {
+						// 	// Peer needs previous
+						// 	rf.PeerStates[server].NextIndex--
+						// 	rf.debugf(Message, "sendApplyMsg -> %v failed, NextIndex:%v\n", server, rf.PeerStates[server].NextIndex)
+						// 	go rf.sendApplyMsg(server)
+					} else {
+						// Reply term is behind? Peer did something wrong
+						rf.fatalf("sendApplyMsg -> %v  Failure with unmatching terms? mine:%v other:%v\n", server, rf.Term, reply.Term)
+					}
+
 				}
-
-			} else {
-				if reply.Term > rf.Term {
-					rf.debugf(State, "sendApplyMsg - State Change\n\t{%v %v %v %v} -> {%v %v %v %v}\n",
-						rf.Term, rf.Leader, rf.Vote, rf.CommitIndex,
-						reply.Term, -1, -1, rf.CommitIndex)
-					rf.Term = reply.Term
-
-				} else if reply.Term == rf.Term {
-					// 	// Peer needs previous
-					// 	rf.PeerStates[server].NextIndex--
-					// 	rf.debugf(Message, "sendApplyMsg -> %v failed, NextIndex:%v\n", server, rf.PeerStates[server].NextIndex)
-					// 	go rf.sendApplyMsg(server)
-				} else {
-					// Reply term is behind? Peer did something wrong
-					rf.fatalf("sendApplyMsg -> %v  Failure with unmatching terms? mine:%v other:%v\n", server, rf.Term, reply.Term)
-				}
-
 			}
+			rf.mu.Unlock()
+			rf.debugf(Locks, "sendApplyMsg - unlock 2\n")
+		case <-timer.C:
+			// do noting, quit
 		}
-		rf.mu.Unlock()
-		rf.debugf(Locks, "sendApplyMsg - unlock 2\n")
 
-	Unlock:
 	}
 	peerState.Unlock()
-	rf.debugf(Locks, "sendApplyMsg - peer.%v.Unlock\n", server)
+	rf.debugf(PeerLocks, "sendApplyMsg - peer.%v.Unlock\n", server)
 }
