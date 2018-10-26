@@ -44,7 +44,7 @@ Loop:
 
 func (rf *Raft) watchTimeout(ctx context.Context) {
 	rf.debugf(Routine, "watchTimeout\n")
-	milliseconds := time.Duration(rand.Int63n(200) + 200)
+	milliseconds := time.Duration(rand.Int63n(300) + 300)
 	ticker := time.NewTicker(milliseconds * time.Millisecond)
 
 Loop:
@@ -91,9 +91,13 @@ func (rf *Raft) seekElection(ctx context.Context) {
 	{
 		rf.debugf(Dump, "seekElection\n")
 		// Prep for vote
+		rf.debugf(State, "seekElection - State Change \n\t{%v %v %v %v} -> {%v %v %v %v}\n",
+			rf.Term, rf.Leader, rf.Vote, rf.CommitIndex,
+			rf.Term+1, -1, rf.me, rf.CommitIndex)
 		rf.Term++
-		electionTerm = rf.Term
+		rf.Leader = -1
 		rf.Vote = rf.me
+		electionTerm = rf.Term
 		votes++
 		args := &RequestVoteArgs{
 			Term:         rf.Term,
@@ -122,12 +126,12 @@ Loop:
 			replies++
 
 			rf.debugf(Locks, "seekElection - lock 2\n")
-			rf.mu.Lock()
+			rf.mu.Lock() // DIRTY!!!
 			{
 				rf.debugf(Unclassified, "seekElection - got response: { T:%v V:%v }\n", reply.Term, reply.VoteGranted)
 				if rf.Term > electionTerm {
 					// Term advanced and Election ended
-					rf.mu.Unlock()
+					rf.mu.Unlock() // DIRTY!!!
 					rf.debugf(Locks, "seekElection - unlock 2\n")
 					break Loop
 				}
@@ -137,7 +141,7 @@ Loop:
 					rf.Term = reply.Term
 					rf.Vote = -1
 
-					rf.mu.Unlock()
+					rf.mu.Unlock() // DIRTY!!!
 					rf.debugf(Locks, "seekElection - unlock 2\n")
 					break Loop
 
@@ -164,7 +168,7 @@ Loop:
 
 					} else if replies-votes > len(rf.peers)/2 {
 						// I can't win the vote
-						rf.mu.Unlock()
+						rf.mu.Unlock() // DIRTY!!!
 						rf.debugf(Locks, "seekElection - unlock 2\n")
 						break Loop
 
@@ -173,7 +177,7 @@ Loop:
 					// Peer has older term (my term might have advanced)
 				}
 			}
-			rf.mu.Unlock() // Warning, super dirty
+			rf.mu.Unlock() // DIRTY!!!
 			rf.debugf(Locks, "seekElection - unlock 2\n")
 
 		case <-ctx.Done():
@@ -202,11 +206,11 @@ Loop:
 				for i := lastReported + 1; i <= bound; i++ {
 					lastReported++
 					message := ApplyMsg{
-						Index:   i,
+						Index:   rf.Entries[i].Index,
 						Command: rf.Entries[i].Command,
 					}
 
-					//rf.debugf(Dump, "reportLogs - reporting {Index:%v}\n", message.Index)
+					rf.debugf(Dump, "reportLogs - reporting {Index:%v}\n", message.Index)
 					applyCh <- message
 				}
 			}

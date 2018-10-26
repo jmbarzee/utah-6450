@@ -25,34 +25,71 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		rf.debugf(Dump, "RequestVote\n")
 
 		if args.Term > rf.Term {
-			rf.debugf(State, "RequestVote - State Change 1\n\t{%v %v %v %v} -> {%v %v %v %v}\n",
-				rf.Term, rf.Leader, rf.Vote, rf.CommitIndex,
-				args.Term, -1, args.Canidate, rf.CommitIndex)
-			rf.Term = args.Term
-			rf.Leader = -1
-			rf.Vote = args.Canidate
-			rf.recentHeartbeat = true
-			reply.VoteGranted = true
+			if args.LastLogTerm > rf.Entries[len(rf.Entries)-1].Term {
+				// Peer's LastLogTerm is Newer. Vote
+				rf.debugf(State, "RequestVote - State Change 1\n\t{%v %v %v %v} -> {%v %v %v %v}\n",
+					rf.Term, rf.Leader, rf.Vote, rf.CommitIndex,
+					args.Term, -1, args.Canidate, rf.CommitIndex)
+				rf.Term = args.Term
+				rf.Leader = -1
+				rf.Vote = args.Canidate
+				rf.recentHeartbeat = true
+				reply.VoteGranted = true
 
-		} else if args.Term == rf.Term {
-			if rf.Vote == -1 || rf.Vote == args.Canidate {
-				if rf.Leader == -1 || rf.Leader == args.Canidate {
-					// TODO check log completeness
+			} else if args.LastLogTerm == rf.Entries[len(rf.Entries)-1].Term {
+				// Peer's LastLogTerm is Same. Check LastLogIndex
+				if args.LastLogIndex >= rf.Entries[len(rf.Entries)-1].Index {
+					// Peer's LastLogIndex is Newer or same. Vote
 					rf.debugf(State, "RequestVote - State Change 2\n\t{%v %v %v %v} -> {%v %v %v %v}\n",
 						rf.Term, rf.Leader, rf.Vote, rf.CommitIndex,
 						args.Term, -1, args.Canidate, rf.CommitIndex)
+					rf.Term = args.Term
+					rf.Leader = -1
 					rf.Vote = args.Canidate
 					rf.recentHeartbeat = true
 					reply.VoteGranted = true
 
 				} else {
-					// Have a leader but haven't voted
-					rf.fatalf("RequestVote - Have a leader(%v) but haven't voted!", rf.Leader)
+					// Peer's LastLogIndex is older. Don't vote
+					rf.debugf(State, "RequestVote - State Change 3\n\t{%v %v %v %v} -> {%v %v %v %v}\n",
+						rf.Term, rf.Leader, rf.Vote, rf.CommitIndex,
+						args.Term, -1, -1, rf.CommitIndex)
+					rf.Term = args.Term
+					rf.Leader = -1
+					rf.Vote = -1
 				}
 
 			} else {
-				// Voted for someone else. Do nothing
-				reply.VoteGranted = false
+				// Peer's LastLogTerm is older. Don't vote
+				rf.debugf(State, "RequestVote - State Change 4\n\t{%v %v %v %v} -> {%v %v %v %v}\n",
+					rf.Term, rf.Leader, rf.Vote, rf.CommitIndex,
+					args.Term, -1, -1, rf.CommitIndex)
+				rf.Term = args.Term
+				rf.Leader = -1
+				rf.Vote = -1
+			}
+
+		} else if args.Term == rf.Term {
+			if rf.Leader == -1 {
+				if rf.Vote == -1 || rf.Vote == args.Canidate {
+					// TODO check log completeness
+					rf.debugf(State, "RequestVote - State Change 5\n\t{%v %v %v %v} -> {%v %v %v %v}\n",
+						rf.Term, rf.Leader, rf.Vote, rf.CommitIndex,
+						args.Term, -1, args.Canidate, rf.CommitIndex)
+					rf.Vote = args.Canidate
+					rf.recentHeartbeat = true
+					reply.VoteGranted = true
+				} else {
+					// Voted for someone else. Do nothing
+					reply.VoteGranted = false
+				}
+
+				//} else if rf.Leader == args.Canidate {
+				// I am fairly certain this cannot happen
+
+			} else {
+				// Have a leader but haven't voted
+				rf.fatalf("RequestVote - Have a leader(%v) but haven't voted!", rf.Leader)
 			}
 		} else {
 			// Old Term. Do nothing
@@ -77,7 +114,15 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, responseChan 
 	if ok {
 		responseChan <- reply
 	} else {
-		go rf.sendRequestVote(server, args, responseChan)
+		rf.debugf(Locks, "sendRequestVote - lock\n")
+		rf.mu.Lock()
+		{
+			if args.Term == rf.Term && rf.Leader == -1 {
+				go rf.sendRequestVote(server, args, responseChan)
+			}
+		}
+		rf.mu.Unlock()
+		rf.debugf(Locks, "sendRequestVote - Unlock\n")
 	}
 }
 
@@ -112,8 +157,6 @@ func (rf *Raft) ApplyMsg(args *ApplyMsgArgs, reply *ApplyMsgReply) {
 			rf.Leader = args.Leader
 			rf.Vote = -1
 			rf.recentHeartbeat = true
-			// TODO Handle	PrevLogIndex, PrevLogTerm, Entries, CommitIndex
-			reply.Success = true
 
 		} else if args.Term == rf.Term {
 			if rf.Leader == args.Leader || rf.Leader == -1 {
@@ -122,8 +165,6 @@ func (rf *Raft) ApplyMsg(args *ApplyMsgArgs, reply *ApplyMsgReply) {
 					args.Term, args.Leader, rf.Vote, rf.CommitIndex)
 				rf.Leader = args.Leader
 				rf.recentHeartbeat = true
-				// TODO Handle	PrevLogIndex, PrevLogTerm, Entries, CommitIndex
-				reply.Success = true
 
 			} else {
 				// Discovered two leaders. Fail!
@@ -136,43 +177,42 @@ func (rf *Raft) ApplyMsg(args *ApplyMsgArgs, reply *ApplyMsgReply) {
 		}
 		reply.Term = rf.Term
 
-		// if args.Term >= rf.Term {
-		// 	// Check for new log/message
-		// 	rf.debugf(Message, "ApplyMsg - len(rf.Entries):%v args.PrevLogIndex:%v\n", len(rf.Entries), args.PrevLogIndex)
-		// 	if len(rf.Entries)-1 < args.PrevLogIndex {
-		// 		// Need previous logs
-		// 		rf.debugf(Message, "ApplyMsg - Need previous logs self:{%v %v} args:{%v %v}\n",
-		// 			len(rf.Entries),
-		// 			"?",
-		// 			args.PrevLogIndex,
-		// 			args.PrevLogTerm)
-		// 		reply.Success = false
+		if args.Term >= rf.Term {
+			// Check for new log/message
+			if len(rf.Entries)-1 < args.PrevLogIndex {
+				// Need previous logs
+				rf.debugf(Message, "ApplyMsg - Need previous logs self:{%v %v} args:{%v %v}\n",
+					len(rf.Entries),
+					"?",
+					args.PrevLogIndex,
+					args.PrevLogTerm)
+				reply.Success = false
 
-		// 	} else if args.PrevLogTerm != rf.Entries[args.PrevLogIndex].Term {
-		// 		// Old logs don't match terms
-		// 		rf.debugf(Message, "ApplyMsg - Old logs don't match terms self:{%v %v} args:{%v %v}\n",
-		// 			len(rf.Entries),
-		// 			rf.Entries[args.PrevLogIndex].Term,
-		// 			args.PrevLogIndex,
-		// 			args.PrevLogTerm)
-		// 		reply.Success = false
+			} else if args.PrevLogTerm != rf.Entries[args.PrevLogIndex].Term {
+				// Old logs don't match terms, backup
+				rf.debugf(Message, "ApplyMsg - Old logs don't match terms self:{%v %v} args:{%v %v}\n",
+					len(rf.Entries),
+					rf.Entries[args.PrevLogIndex].Term,
+					args.PrevLogIndex,
+					args.PrevLogTerm)
+				reply.Success = false
 
-		// 	} else {
-		// 		// Choke down new Logs
-		// 		rf.debugf(Dump, "ApplyMsg - accepting new logs self:{%v %v} args:{%v %v}\n",
-		// 			len(rf.Entries),
-		// 			rf.Entries[args.PrevLogIndex].Term,
-		// 			args.PrevLogIndex,
-		// 			args.PrevLogTerm,
-		// 		)
-		// 		rf.CommitIndex = args.CommitIndex
-		// 		rf.Entries = append(rf.Entries[0:args.PrevLogIndex+1], args.Entries...)
-
-		// 	}
-		// }
+			} else {
+				// Choke down new Logs
+				rf.debugf(Dump, "ApplyMsg - accepting new logs self:{%v %v} args:{%v %v}\n",
+					len(rf.Entries),
+					rf.Entries[args.PrevLogIndex].Term,
+					args.PrevLogIndex,
+					args.PrevLogTerm,
+				)
+				rf.CommitIndex = args.CommitIndex
+				rf.Entries = append(rf.Entries[0:args.PrevLogIndex+1], args.Entries...)
+				reply.Success = true
+			}
+		}
 	}
 	rf.mu.Unlock()
-	rf.debugf(Locks, "ApplyMsg - lock\n")
+	rf.debugf(Locks, "ApplyMsg - Unlock\n")
 
 	rf.debugf(Message, "ApplyMsg  Reply:\n\tTerm:%v Success:%v\n",
 		reply.Term, reply.Success)
@@ -192,9 +232,6 @@ func (rf *Raft) sendApplyMessage(server int, args *ApplyMsgArgs, responseChan ch
 
 func (rf *Raft) doApplyMsg(server int) {
 	// rf.debugf(Routine, "sendApplyMsg -> %v\n", server)
-	if rf.Leader != rf.me {
-		return
-	}
 
 	args := &ApplyMsgArgs{}
 
@@ -203,32 +240,38 @@ func (rf *Raft) doApplyMsg(server int) {
 	peerState.Lock()
 	{
 		rf.debugf(Locks, "sendApplyMsg - lock\n")
-		rf.mu.Lock()
+		rf.mu.Lock() // DIRTY!!!
 		{
-			//rf.debugf(Dump, "sendApplyMsg -> %v\n", server)
-			// nextIndex := rf.PeerStates[server].NextIndex
-			// if nextIndex < 1 {
-			// 	rf.debugf(Message, "sendApplyMsg -> %v  NextIndex out of bounds!!! %v < 0 \n", server, nextIndex)
-			// 	nextIndex = 1
-			// }
-			// if nextIndex > len(rf.Entries) {
-			// 	// nextIndex > len(rf.Entries) - 1  is a heartbeat and should be handled normally
-			// 	rf.debugf(Message, "sendApplyMsg -> %v  NextIndex out of bounds!!! %v > %v\n", server, nextIndex, len(rf.Entries))
-			// 	nextIndex = len(rf.Entries)
-			// }
+			if rf.Leader != rf.me {
+				rf.mu.Unlock() // DIRTY!!!
+				rf.debugf(Locks, "sendApplyMsg - unlock 2\n")
+				goto Unlock
+			}
+
+			// rf.debugf(Dump, "sendApplyMsg -> %v\n", server)
+			nextIndex := rf.PeerStates[server].NextIndex
+			if nextIndex < 1 {
+				rf.debugf(Message, "sendApplyMsg -> %v  NextIndex out of bounds!!! %v < 0 \n", server, nextIndex)
+				nextIndex = 1
+			}
+			if nextIndex > len(rf.Entries) {
+				// nextIndex > len(rf.Entries) - 1  is a heartbeat and should be handled normally
+				rf.debugf(Message, "sendApplyMsg -> %v  NextIndex out of bounds!!! %v > %v\n", server, nextIndex, len(rf.Entries))
+				nextIndex = len(rf.Entries)
+			}
 
 			args.Term = rf.Term
 			args.Leader = rf.Leader
 
-			// args.PrevLogIndex = nextIndex - 1
-			// args.PrevLogTerm = rf.Entries[nextIndex-1].Term
-			// args.CommitIndex = rf.CommitIndex
+			args.PrevLogIndex = nextIndex - 1
+			args.PrevLogTerm = rf.Entries[nextIndex-1].Term
+			args.CommitIndex = rf.CommitIndex
 
-			// if nextIndex < len(rf.Entries) {
-			// 	args.Entries = rf.Entries[nextIndex:len(rf.Entries)]
-			// } else {
-			// 	args.Entries = make([]Entry, 0)
-			// }
+			if nextIndex < len(rf.Entries) {
+				args.Entries = rf.Entries[nextIndex:len(rf.Entries)]
+			} else {
+				args.Entries = make([]Entry, 0)
+			}
 		}
 		rf.mu.Unlock()
 		rf.debugf(Locks, "sendApplyMsg - unlock\n")
@@ -244,31 +287,33 @@ func (rf *Raft) doApplyMsg(server int) {
 			rf.mu.Lock()
 			{
 				if reply.Success {
+					// Peer added new log
 					if reply.Term == rf.Term {
 						// Peer has matching term
-						// if reply.Success {
-						// 	// Peer added new log
-						// 	rf.PeerStates[server].NextIndex = len(rf.Entries)
-						// 	rf.debugf(Unclassified, "sendApplyMsg -> %v - Set %v.NextIndex: %v", server, server, rf.PeerStates[server].NextIndex)
-						// 	rf.PeerStates[server].MatchIndex = rf.PeerStates[server].NextIndex - 1
+						if len(args.Entries) > 0 {
+							rf.PeerStates[server].NextIndex = args.Entries[len(args.Entries)-1].Index + 1
+						} else {
+							// NextIndex did not advance
+						}
+						rf.PeerStates[server].MatchIndex = rf.PeerStates[server].NextIndex - 1
 
-						// 	couldAdvCommitIndex := true
-						// 	for couldAdvCommitIndex {
-						// 		confirmed := 1
-						// 		couldAdvCommitIndex = false
-						// 		for peer, state := range rf.PeerStates {
-						// 			if peer == rf.me {
-						// 				continue
-						// 			}
-						// 			if state.MatchIndex > rf.CommitIndex {
-						// 				confirmed++
-						// 			}
-						// 		}
-						// 		if confirmed > len(rf.peers)/2 {
-						// 			rf.CommitIndex++
-						// 			couldAdvCommitIndex = true
-						// 		}
-						// 	}
+						couldAdvCommitIndex := true
+						for couldAdvCommitIndex {
+							confirmed := 1
+							couldAdvCommitIndex = false
+							for peer, state := range rf.PeerStates {
+								if peer == rf.me {
+									continue
+								}
+								if state.MatchIndex > rf.CommitIndex {
+									confirmed++
+								}
+							}
+							if confirmed > len(rf.peers)/2 {
+								rf.CommitIndex++
+								couldAdvCommitIndex = true
+							}
+						}
 
 					} else {
 						// Terms Don't Match. Could we have advanced ours?
@@ -285,24 +330,27 @@ func (rf *Raft) doApplyMsg(server int) {
 						rf.Vote = -1
 
 					} else if reply.Term == rf.Term {
-						// 	// Peer needs previous
-						// 	rf.PeerStates[server].NextIndex--
-						// 	rf.debugf(Message, "sendApplyMsg -> %v failed, NextIndex:%v\n", server, rf.PeerStates[server].NextIndex)
-						// 	go rf.sendApplyMsg(server)
+						// Peer needs previous
+						rf.PeerStates[server].NextIndex--
+						rf.debugf(Message, "sendApplyMsg -> %v failed, NextIndex:%v\n", server, rf.PeerStates[server].NextIndex)
+						go rf.doApplyMsg(server)
 					} else {
-						// Reply term is behind? Peer did something wrong
-						rf.fatalf("sendApplyMsg -> %v  Failure with unmatching terms? mine:%v other:%v\n", server, rf.Term, reply.Term)
+						// Reply term is behind? I got updated since request was sent.
+						// Try Again?
+						rf.debugf(State, "sendApplyMsg -> %v  Failure with unmatching terms? mine:%v other:%v\n", server, rf.Term, reply.Term)
+						go rf.doApplyMsg(server)
 					}
 
 				}
 			}
-			rf.mu.Unlock()
+			rf.mu.Unlock() // DIRTY!!!
 			rf.debugf(Locks, "sendApplyMsg - unlock 2\n")
 		case <-timer.C:
 			// do noting, quit
 		}
 
 	}
+Unlock:
 	peerState.Unlock()
 	rf.debugf(PeerLocks, "sendApplyMsg - peer.%v.Unlock\n", server)
 }

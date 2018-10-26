@@ -30,7 +30,7 @@ const (
 // WARNING! catagory="Dump" assumes that caller holds the lock
 func (rf *Raft) debugf(catagory, format string, a ...interface{}) {
 	const (
-		debug = false
+		debug = true
 
 		debugDump         = true
 		debugRoutine      = true
