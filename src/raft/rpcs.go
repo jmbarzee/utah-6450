@@ -25,6 +25,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		rf.debugf(Dump, "RequestVote\n")
 
 		if args.Term > rf.Term {
+			// Peer's Term is newer
 			if args.LastLogTerm > rf.Entries[len(rf.Entries)-1].Term {
 				// Peer's LastLogTerm is Newer. Vote
 				rf.debugf(State, "RequestVote - State Change 1\n\t{%v %v %v %v} -> {%v %v %v %v}\n",
@@ -57,6 +58,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 					rf.Term = args.Term
 					rf.Leader = -1
 					rf.Vote = -1
+					reply.VoteGranted = false
 				}
 
 			} else {
@@ -67,29 +69,58 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 				rf.Term = args.Term
 				rf.Leader = -1
 				rf.Vote = -1
+				reply.VoteGranted = false
 			}
 
 		} else if args.Term == rf.Term {
+			// Peers Term matches
 			if rf.Leader == -1 {
-				if rf.Vote == -1 || rf.Vote == args.Canidate {
-					// TODO check log completeness
-					rf.debugf(State, "RequestVote - State Change 5\n\t{%v %v %v %v} -> {%v %v %v %v}\n",
-						rf.Term, rf.Leader, rf.Vote, rf.CommitIndex,
-						args.Term, -1, args.Canidate, rf.CommitIndex)
-					rf.Vote = args.Canidate
+				// Don't have a leader
+				if rf.Vote == -1 {
+					// haven't voted
+					if args.LastLogTerm > rf.Entries[len(rf.Entries)-1].Term {
+						// Peer's LastLogTerm is Newer. Vote
+						rf.debugf(State, "RequestVote - State Change 5\n\t{%v %v %v %v} -> {%v %v %v %v}\n",
+							rf.Term, rf.Leader, rf.Vote, rf.CommitIndex,
+							args.Term, -1, args.Canidate, rf.CommitIndex)
+						rf.Vote = args.Canidate
+						rf.recentHeartbeat = true
+						reply.VoteGranted = true
+
+					} else if args.LastLogTerm == rf.Entries[len(rf.Entries)-1].Term {
+						// Peer's LastLogTerm is Same. Check LastLogIndex
+						if args.LastLogIndex >= rf.Entries[len(rf.Entries)-1].Index {
+							// Peer's LastLogIndex is Newer or same. Vote
+							rf.debugf(State, "RequestVote - State Change 6\n\t{%v %v %v %v} -> {%v %v %v %v}\n",
+								rf.Term, rf.Leader, rf.Vote, rf.CommitIndex,
+								args.Term, -1, args.Canidate, rf.CommitIndex)
+							rf.Vote = args.Canidate
+							rf.recentHeartbeat = true
+							reply.VoteGranted = true
+
+						} else {
+							// Peer's LastLogIndex is older. Do nothing
+							reply.VoteGranted = false
+
+						}
+					} else {
+						// Peer's LastLogTerm is older. Do nothing
+						reply.VoteGranted = false
+
+					}
+				} else if rf.Vote == args.Canidate {
+					// Voted for peer already. Vote (again)
 					rf.recentHeartbeat = true
 					reply.VoteGranted = true
+
 				} else {
 					// Voted for someone else. Do nothing
 					reply.VoteGranted = false
 				}
 
-				//} else if rf.Leader == args.Canidate {
-				// I am fairly certain this cannot happen
-
 			} else {
-				// Have a leader but haven't voted
-				rf.fatalf("RequestVote - Have a leader(%v) but haven't voted!", rf.Leader)
+				// Have a leader. Do Nothing
+				reply.VoteGranted = false
 			}
 		} else {
 			// Old Term. Do nothing
@@ -182,31 +213,34 @@ func (rf *Raft) ApplyMsg(args *ApplyMsgArgs, reply *ApplyMsgReply) {
 			if len(rf.Entries)-1 < args.PrevLogIndex {
 				// Need previous logs
 				rf.debugf(Message, "ApplyMsg - Need previous logs self:{%v %v} args:{%v %v}\n",
-					len(rf.Entries),
+					len(rf.Entries)-1,
 					"?",
 					args.PrevLogIndex,
 					args.PrevLogTerm)
+				rf.recentHeartbeat = true
 				reply.Success = false
 
 			} else if args.PrevLogTerm != rf.Entries[args.PrevLogIndex].Term {
 				// Old logs don't match terms, backup
 				rf.debugf(Message, "ApplyMsg - Old logs don't match terms self:{%v %v} args:{%v %v}\n",
-					len(rf.Entries),
+					len(rf.Entries)-1,
 					rf.Entries[args.PrevLogIndex].Term,
 					args.PrevLogIndex,
 					args.PrevLogTerm)
+				rf.recentHeartbeat = true
 				reply.Success = false
 
 			} else {
 				// Choke down new Logs
-				rf.debugf(Dump, "ApplyMsg - accepting new logs self:{%v %v} args:{%v %v}\n",
-					len(rf.Entries),
+				rf.debugf(Dump, "ApplyMsg - accepting new logs self:{%v %v} args:{%v %v} \n\t%v\n",
+					len(rf.Entries)-1,
 					rf.Entries[args.PrevLogIndex].Term,
 					args.PrevLogIndex,
 					args.PrevLogTerm,
-				)
+					entriesToString(args.Entries))
 				rf.CommitIndex = args.CommitIndex
 				rf.Entries = append(rf.Entries[0:args.PrevLogIndex+1], args.Entries...)
+				rf.recentHeartbeat = true
 				reply.Success = true
 			}
 		}
@@ -267,11 +301,7 @@ func (rf *Raft) doApplyMsg(server int) {
 			args.PrevLogTerm = rf.Entries[nextIndex-1].Term
 			args.CommitIndex = rf.CommitIndex
 
-			if nextIndex < len(rf.Entries) {
-				args.Entries = rf.Entries[nextIndex:len(rf.Entries)]
-			} else {
-				args.Entries = make([]Entry, 0)
-			}
+			args.Entries = rf.Entries[nextIndex:]
 		}
 		rf.mu.Unlock()
 		rf.debugf(Locks, "sendApplyMsg - unlock\n")
