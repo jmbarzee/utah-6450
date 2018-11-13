@@ -29,7 +29,7 @@ Loop:
 						// Don't send heartbeat to myself
 						continue
 					}
-					go rf.doApplyMsg(peer)
+					go rf.sendApplyMsg(peer)
 				}
 			}
 		Unlock:
@@ -105,6 +105,7 @@ func (rf *Raft) seekElection(ctx context.Context) {
 			LastLogIndex: len(rf.Entries) - 1,
 			LastLogTerm:  rf.Entries[len(rf.Entries)-1].Term,
 		}
+		rf.persist()
 
 		// Ask for votes
 		for peer := range rf.peers {
@@ -140,6 +141,7 @@ Loop:
 					// Peer has newer term
 					rf.Term = reply.Term
 					rf.Vote = -1
+					rf.persist()
 
 					rf.mu.Unlock() // DIRTY!!!
 					rf.debugf(Locks, "seekElection - unlock 2\n")
@@ -158,6 +160,7 @@ Loop:
 								}
 							}
 							rf.Leader = rf.me
+							rf.persist()
 
 							rf.debugf(Dump, "seekElection - elected!\n")
 

@@ -179,13 +179,14 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 			Term:    term,
 		}
 		rf.Entries = append(rf.Entries, newEntry)
+		rf.persist()
 
 		for peer := range rf.peers {
 			if peer == rf.me {
 				// Don't send heartbeat to myself
 				continue
 			}
-			go rf.doApplyMsg(peer)
+			go rf.sendApplyMsg(peer)
 		}
 	}
 Unlock:
@@ -221,25 +222,38 @@ func (rf *Raft) Kill() {
 func Make(peers []*labrpc.ClientEnd, me int,
 	persister *Persister, applyCh chan ApplyMsg) *Raft {
 	rf := &Raft{}
-	rf.peers = peers
-	rf.persister = persister
-	rf.me = me
 
-	// Your initialization code here (2A, 2B, 2C).
-	rf.readPersist(persister.ReadRaftState())
+	rf.debugf(Locks, "Make - lock\n")
+	rf.mu.Lock()
+	{
+		rf.peers = peers
+		rf.persister = persister
+		rf.me = me
 
-	rf.PeerStates = make([]PeerState, 0)
+		// Your initialization code here (2A, 2B, 2C).
 
-	rf.recentHeartbeat = false
+		// initialize from state persisted before a crash
+		rf.readPersist(rf.persister.ReadRaftState())
 
-	var ctx context.Context
-	ctx, rf.killRoutines = context.WithCancel(context.Background())
-	go rf.sendHeartbeats(ctx)
-	go rf.watchTimeout(ctx)
-	go rf.reportLogs(ctx, applyCh)
+		if rf.Leader == rf.me {
+			rf.PeerStates = make([]PeerState, len(peers))
 
-	// initialize from state persisted before a crash
-	rf.readPersist(persister.ReadRaftState())
+		} else {
+			rf.PeerStates = make([]PeerState, 0)
+		}
+
+		rf.recentHeartbeat = false
+
+		var ctx context.Context
+		ctx, rf.killRoutines = context.WithCancel(context.Background())
+		go rf.sendHeartbeats(ctx)
+		go rf.watchTimeout(ctx)
+		go rf.reportLogs(ctx, applyCh)
+
+		rf.debugf(Dump, "Make - me:%v\n", rf.me)
+	}
+	rf.mu.Unlock()
+	rf.debugf(Locks, "Make - Unlock\n")
 
 	return rf
 }

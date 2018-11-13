@@ -36,6 +36,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 				rf.Vote = args.Canidate
 				rf.recentHeartbeat = true
 				reply.VoteGranted = true
+				rf.persist()
 
 			} else if args.LastLogTerm == rf.Entries[len(rf.Entries)-1].Term {
 				// Peer's LastLogTerm is Same. Check LastLogIndex
@@ -49,6 +50,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 					rf.Vote = args.Canidate
 					rf.recentHeartbeat = true
 					reply.VoteGranted = true
+					rf.persist()
 
 				} else {
 					// Peer's LastLogIndex is older. Don't vote
@@ -59,6 +61,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 					rf.Leader = -1
 					rf.Vote = -1
 					reply.VoteGranted = false
+					rf.persist()
 				}
 
 			} else {
@@ -70,6 +73,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 				rf.Leader = -1
 				rf.Vote = -1
 				reply.VoteGranted = false
+				rf.persist()
 			}
 
 		} else if args.Term == rf.Term {
@@ -86,6 +90,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 						rf.Vote = args.Canidate
 						rf.recentHeartbeat = true
 						reply.VoteGranted = true
+						rf.persist()
 
 					} else if args.LastLogTerm == rf.Entries[len(rf.Entries)-1].Term {
 						// Peer's LastLogTerm is Same. Check LastLogIndex
@@ -97,6 +102,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 							rf.Vote = args.Canidate
 							rf.recentHeartbeat = true
 							reply.VoteGranted = true
+							rf.persist()
 
 						} else {
 							// Peer's LastLogIndex is older. Do nothing
@@ -189,6 +195,7 @@ func (rf *Raft) ApplyMsg(args *ApplyMsgArgs, reply *ApplyMsgReply) {
 			rf.Leader = args.Leader
 			rf.Vote = -1
 			rf.recentHeartbeat = true
+			rf.persist()
 
 		} else if args.Term == rf.Term {
 			if rf.Leader == args.Leader || rf.Leader == -1 {
@@ -197,6 +204,7 @@ func (rf *Raft) ApplyMsg(args *ApplyMsgArgs, reply *ApplyMsgReply) {
 					args.Term, args.Leader, rf.Vote, rf.CommitIndex)
 				rf.Leader = args.Leader
 				rf.recentHeartbeat = true
+				rf.persist()
 
 			} else {
 				// Discovered two leaders. Fail!
@@ -254,6 +262,7 @@ func (rf *Raft) ApplyMsg(args *ApplyMsgArgs, reply *ApplyMsgReply) {
 				rf.Entries = append(rf.Entries[0:args.PrevLogIndex+1], args.Entries...)
 				rf.recentHeartbeat = true
 				reply.Success = true
+				rf.persist()
 			}
 		}
 	}
@@ -264,7 +273,7 @@ func (rf *Raft) ApplyMsg(args *ApplyMsgArgs, reply *ApplyMsgReply) {
 		reply.Term, reply.Success)
 }
 
-func (rf *Raft) sendApplyMessage(server int, args *ApplyMsgArgs, responseChan chan *ApplyMsgReply) {
+func (rf *Raft) sendApplyMessageChanneled(server int, args *ApplyMsgArgs, responseChan chan *ApplyMsgReply) {
 	//rf.debugf(Routine, "sendApplyMessage -> %v\n", server)
 	reply := &ApplyMsgReply{}
 	rf.debugf(Message, "sendApplyMsg -> %v  Args:\n\tTerm:%v Lead:%v PrevIndex:%v PrevTerm:%v CommitIndex:%v \n\t%v\n", server,
@@ -276,8 +285,8 @@ func (rf *Raft) sendApplyMessage(server int, args *ApplyMsgArgs, responseChan ch
 	}
 }
 
-func (rf *Raft) doApplyMsg(server int) {
-	// rf.debugf(Routine, "sendApplyMsg -> %v\n", server)
+func (rf *Raft) sendApplyMsg(server int) {
+	rf.debugf(Routine, "ApplyMsg -> %v\n", server)
 
 	args := &ApplyMsgArgs{}
 
@@ -321,7 +330,7 @@ func (rf *Raft) doApplyMsg(server int) {
 		responseChan := make(chan *ApplyMsgReply)
 		timer := time.NewTimer(time.Millisecond * 100)
 
-		go rf.sendApplyMessage(server, args, responseChan)
+		go rf.sendApplyMessageChanneled(server, args, responseChan)
 
 		select {
 		case reply := <-responseChan:
@@ -370,17 +379,18 @@ func (rf *Raft) doApplyMsg(server int) {
 						rf.Term = reply.Term
 						rf.Leader = -1
 						rf.Vote = -1
+						rf.persist() // TODO Consider not persisting?
 
 					} else if reply.Term == rf.Term {
 						// Peer needs previous
 						rf.PeerStates[server].NextIndex = reply.LastIndexOfConflict
 						rf.debugf(Message, "sendApplyMsg -> %v failed, NextIndex:%v\n", server, rf.PeerStates[server].NextIndex)
-						go rf.doApplyMsg(server)
+						go rf.sendApplyMsg(server)
 					} else {
 						// Reply term is behind? I got updated since request was sent.
 						// Try Again?
 						rf.debugf(State, "sendApplyMsg -> %v  Failure with unmatching terms? mine:%v other:%v\n", server, rf.Term, reply.Term)
-						go rf.doApplyMsg(server)
+						go rf.sendApplyMsg(server)
 					}
 
 				}
