@@ -18,7 +18,9 @@ package raft
 //
 
 import (
+	"bytes"
 	"context"
+	"encoding/gob"
 	"sync"
 
 	"cs6450.utah.systems/u1177988/labs/src/labrpc"
@@ -103,28 +105,40 @@ func (rf *Raft) GetState() (int, bool) {
 // see paper's Figure 2 for a description of what should be persistent.
 //
 func (rf *Raft) persist() {
-	// Your code here (2C).
-	// Example:
-	// w := new(bytes.Buffer)
-	// e := gob.NewEncoder(w)
-	// e.Encode(rf.xxx)
-	// e.Encode(rf.yyy)
-	// data := w.Bytes()
-	// rf.persister.SaveRaftState(data)
+	w := bytes.NewBuffer([]byte{})
+	e := gob.NewEncoder(w)
+	e.Encode(rf.Term)
+	e.Encode(rf.Leader)
+	e.Encode(rf.Vote)
+	e.Encode(rf.Entries)
+	data := w.Bytes()
+	rf.persister.SaveRaftState(data)
 }
 
 //
 // restore previously persisted state.
 //
 func (rf *Raft) readPersist(data []byte) {
-	// Your code here (2C).
-	// Example:
-	// r := bytes.NewBuffer(data)
-	// d := gob.NewDecoder(r)
-	// d.Decode(&rf.xxx)
-	// d.Decode(&rf.yyy)
-	if data == nil || len(data) < 1 { // bootstrap without any state?
-		return
+	if data != nil && len(data) > 0 {
+		r := bytes.NewBuffer(data)
+		d := gob.NewDecoder(r)
+		d.Decode(&rf.Term)
+		d.Decode(&rf.Leader)
+		d.Decode(&rf.Vote)
+		d.Decode(&rf.Entries)
+	} else {
+		// bootstrap without any state?
+		rf.Term = 0
+		rf.Leader = -1
+		rf.Vote = -1
+
+		rf.Entries = []Entry{
+			Entry{
+				Index:   0,
+				Command: 0,
+				Term:    0,
+			},
+		}
 	}
 }
 
@@ -212,17 +226,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.me = me
 
 	// Your initialization code here (2A, 2B, 2C).
-	rf.Term = 0
-	rf.Leader = -1
-	rf.Vote = -1
-
-	rf.Entries = []Entry{
-		Entry{
-			Index:   0,
-			Command: 0,
-			Term:    0,
-		},
-	}
+	rf.readPersist(persister.ReadRaftState())
 
 	rf.PeerStates = make([]PeerState, 0)
 
