@@ -169,8 +169,9 @@ type ApplyMsgArgs struct {
 }
 
 type ApplyMsgReply struct {
-	Term    int
-	Success bool
+	Term                int
+	Success             bool
+	LastIndexOfConflict int
 }
 
 func (rf *Raft) ApplyMsg(args *ApplyMsgArgs, reply *ApplyMsgReply) {
@@ -205,6 +206,7 @@ func (rf *Raft) ApplyMsg(args *ApplyMsgArgs, reply *ApplyMsgReply) {
 		} else {
 			// Old Term, Do nothing
 			reply.Success = false
+			reply.LastIndexOfConflict = -1
 		}
 		reply.Term = rf.Term
 
@@ -219,6 +221,7 @@ func (rf *Raft) ApplyMsg(args *ApplyMsgArgs, reply *ApplyMsgReply) {
 					args.PrevLogTerm)
 				rf.recentHeartbeat = true
 				reply.Success = false
+				reply.LastIndexOfConflict = -1
 
 			} else if args.PrevLogTerm != rf.Entries[args.PrevLogIndex].Term {
 				// Old logs don't match terms, backup
@@ -227,6 +230,15 @@ func (rf *Raft) ApplyMsg(args *ApplyMsgArgs, reply *ApplyMsgReply) {
 					rf.Entries[args.PrevLogIndex].Term,
 					args.PrevLogIndex,
 					args.PrevLogTerm)
+				conflictingTerm := rf.Entries[args.PrevLogIndex].Term
+				lastIndexOfConflict := args.PrevLogIndex
+				for conflictingTerm == rf.Entries[lastIndexOfConflict].Term {
+					lastIndexOfConflict--
+					if lastIndexOfConflict == 0 {
+						break
+					}
+				}
+				reply.LastIndexOfConflict = lastIndexOfConflict
 				rf.recentHeartbeat = true
 				reply.Success = false
 
@@ -361,7 +373,7 @@ func (rf *Raft) doApplyMsg(server int) {
 
 					} else if reply.Term == rf.Term {
 						// Peer needs previous
-						rf.PeerStates[server].NextIndex--
+						rf.PeerStates[server].NextIndex = reply.LastIndexOfConflict
 						rf.debugf(Message, "sendApplyMsg -> %v failed, NextIndex:%v\n", server, rf.PeerStates[server].NextIndex)
 						go rf.doApplyMsg(server)
 					} else {
