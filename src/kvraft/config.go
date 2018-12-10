@@ -10,7 +10,7 @@ import "math/rand"
 import "encoding/base64"
 import "sync"
 import "runtime"
-import "raft"
+import "../raft"
 import "fmt"
 
 func randstring(n int) string {
