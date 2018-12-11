@@ -69,7 +69,7 @@ func (ck *Clerk) Get(key string) string {
 			}
 			ck.LastLeadder++
 
-		case <-time.After(150 * time.Millisecond): // rpc timeout: 200ms
+		case <-time.After(150 * time.Millisecond):
 			ck.LastLeadder++
 			continue
 		}

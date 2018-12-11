@@ -43,6 +43,9 @@ type RaftKV struct {
 	ResendTable map[int64]int64
 }
 
+//This function checks for agreement
+// The watchApplyChan is constantly checking the apply chan for messages
+// If it recieves apply message it will forward it here
 func (kv *RaftKV) wait4Agreement(index int, term int, op Op) bool {
 	kv.Lock(true)
 	waitChan := make(chan raft.ApplyMsg, 1)
@@ -155,10 +158,10 @@ func (kv *RaftKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 }
 
 func (kv *RaftKV) checkForSnapshot(index int) {
-	if kv.snapshot && kv.rf.GetRaftStateSize() >= kv.maxraftstate {
-		kv.rf.TrimLog(index)
-		kv.save()
-	}
+	// if kv.snapshot && kv.rf.GetRaftStateSize() >= kv.maxraftstate {
+	// 	// kv.rf.TrimLog(index) //TODO need something like this implemented
+	// 	kv.save()
+	// }
 }
 
 // Worker thread for Server
@@ -175,6 +178,8 @@ func (kv *RaftKV) watchApplyChan() {
 				continue
 			}
 
+			//TODO see the routines.go file line 220 (had to make a small adjustment for when you apply the first log which is not of type OP)
+			//Small hack just wanted you to be aware of
 			cmd := ap.Command.(Op)
 
 			if dup, ok := kv.ResendTable[cmd.ID]; !ok || dup != cmd.Index {
@@ -189,7 +194,7 @@ func (kv *RaftKV) watchApplyChan() {
 
 			}
 
-			kv.checkForSnapshot(ap.Index)
+			kv.checkForSnapshot(ap.Index) //TODO implement
 
 			if c, ok := kv.requests[ap.Index]; ok {
 				delete(kv.requests, ap.Index)
@@ -202,12 +207,14 @@ func (kv *RaftKV) watchApplyChan() {
 	}
 }
 
+//TODO more to implemnt in save and load
 func (kv *RaftKV) save() {
 	w := new(bytes.Buffer)
 	e := gob.NewEncoder(w)
 	e.Encode(kv.KVstore)
-	snapshot := w.Bytes()
-	kv.rf.PersistSnap(snapshot)
+	// snapshot := w.Bytes()
+	// kv.rf.PersistSnap(snapshot) //TODO implement
+
 }
 
 func (kv *RaftKV) load(data []byte) {
