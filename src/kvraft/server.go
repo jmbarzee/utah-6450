@@ -1,8 +1,8 @@
 package raftkv
 
 //
-//	Jacob Barzee
-//	Matt Howa
+//	Jacob Barzee | u1177988
+//	Matt Howa | u0805396
 //		Worked together on Lab3
 
 import (

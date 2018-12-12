@@ -1,15 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
   <component name="ChangeListManager">
-    <list default="true" id="c2f92aeb-5097-418e-8153-eda2984f0dbf" name="Default" comment="">
-      <change type="MODIFICATION" beforePath="$PROJECT_DIR$/src/kvraft/client.go" afterPath="$PROJECT_DIR$/src/kvraft/client.go" />
-      <change type="MODIFICATION" beforePath="$PROJECT_DIR$/src/kvraft/config.go" afterPath="$PROJECT_DIR$/src/kvraft/config.go" />
-      <change type="MODIFICATION" beforePath="$PROJECT_DIR$/src/kvraft/server.go" afterPath="$PROJECT_DIR$/src/kvraft/server.go" />
-      <change type="MODIFICATION" beforePath="$PROJECT_DIR$/src/kvraft/server_routines.go" afterPath="$PROJECT_DIR$/src/kvraft/server_routines.go" />
-      <change type="MODIFICATION" beforePath="$PROJECT_DIR$/src/raft/config.go" afterPath="$PROJECT_DIR$/src/raft/config.go" />
-      <change type="MODIFICATION" beforePath="$PROJECT_DIR$/src/raft/raft.go" afterPath="$PROJECT_DIR$/src/raft/raft.go" />
-      <change type="MODIFICATION" beforePath="$PROJECT_DIR$/src/raft/routines.go" afterPath="$PROJECT_DIR$/src/raft/routines.go" />
-    </list>
+    <list default="true" id="c2f92aeb-5097-418e-8153-eda2984f0dbf" name="Default" comment="" />
     <option name="EXCLUDED_CONVERTED_TO_IGNORED" value="true" />
     <option name="TRACKING_ENABLED" value="true" />
     <option name="SHOW_DIALOG" value="false" />
