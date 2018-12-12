@@ -1,13 +1,20 @@
 package raftkv
 
-import "labrpc"
-import "crypto/rand"
-import "math/big"
+import (
+	"crypto/rand"
+	"math/big"
+	"time"
 
+	"cs6450.utah.systems/u1177988/labs/src/labrpc"
+)
 
 type Clerk struct {
 	servers []*labrpc.ClientEnd
+
 	// You will have to modify this struct.
+	// for keeping track of the most recent leader (probably an unnecessary optimization)
+	Term   int
+	Leader int
 }
 
 func nrand() int64 {
@@ -37,9 +44,48 @@ func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 // arguments. and reply must be passed as a pointer.
 //
 func (ck *Clerk) Get(key string) string {
+	args := GetArgs{
+		Key: key,
+		ID:  nrand(),
+	}
+	leader := ck.Leader
 
-	// You will have to modify this function.
-	return ""
+Loop:
+	for {
+		reply := GetReply{}
+		okChan := ck.SendGet(leader, &args, &reply)
+		select {
+		case ok := <-okChan:
+			if !ok {
+				leader = (leader + 1) % len(ck.servers)
+			} else if reply.Status == StatusNotLead {
+				leader = (leader + 1) % len(ck.servers)
+			} else if reply.Status == StatusPending {
+				if reply.Term >= ck.Term {
+					ck.Term = reply.Term
+					ck.Leader = leader
+				}
+			} else if reply.Status == StatusSuccess {
+				if reply.Term >= ck.Term {
+					ck.Term = reply.Term
+					ck.Leader = leader
+				}
+				return reply.Value
+			}
+		case <-time.After(time.Millisecond * 100):
+			leader = (leader + 1) % len(ck.servers)
+			continue Loop
+		}
+	}
+}
+
+func (ck *Clerk) SendGet(id int, args *GetArgs, reply *GetReply) chan bool {
+	okChan := make(chan bool)
+	go func() {
+		okChan <- ck.servers[id].Call("RaftKV.Get", args, reply)
+		close(okChan)
+	}()
+	return okChan
 }
 
 //
@@ -52,13 +98,56 @@ func (ck *Clerk) Get(key string) string {
 // must match the declared types of the RPC handler function's
 // arguments. and reply must be passed as a pointer.
 //
-func (ck *Clerk) PutAppend(key string, value string, op string) {
-	// You will have to modify this function.
+func (ck *Clerk) PutAppend(key string, value string, method Method) {
+	args := PutAppendArgs{
+		Key:    key,
+		Value:  value,
+		ID:     nrand(),
+		Method: method,
+	}
+	leader := ck.Leader
+
+Loop:
+	for {
+		reply := PutAppendReply{}
+		okChan := ck.SendPutAppend(leader, &args, &reply)
+		select {
+		case ok := <-okChan:
+			if !ok {
+				leader = (leader + 1) % len(ck.servers)
+			} else if reply.Status == StatusNotLead {
+				leader = (leader + 1) % len(ck.servers)
+			} else if reply.Status == StatusPending {
+				if reply.Term >= ck.Term {
+					ck.Term = reply.Term
+					ck.Leader = leader
+				}
+			} else if reply.Status == StatusSuccess {
+				if reply.Term >= ck.Term {
+					ck.Term = reply.Term
+					ck.Leader = leader
+				}
+				return
+			}
+		case <-time.After(time.Millisecond * 100):
+			leader = (leader + 1) % len(ck.servers)
+			continue Loop
+		}
+	}
 }
 
 func (ck *Clerk) Put(key string, value string) {
-	ck.PutAppend(key, value, "Put")
+	ck.PutAppend(key, value, MethodPut)
 }
 func (ck *Clerk) Append(key string, value string) {
-	ck.PutAppend(key, value, "Append")
+	ck.PutAppend(key, value, MethodAppend)
+}
+
+func (ck *Clerk) SendPutAppend(id int, args *PutAppendArgs, reply *PutAppendReply) chan bool {
+	okChan := make(chan bool)
+	go func() {
+		okChan <- ck.servers[id].Call("RaftKV.PutAppend", args, reply)
+		close(okChan)
+	}()
+	return okChan
 }

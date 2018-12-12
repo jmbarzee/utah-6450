@@ -1,11 +1,13 @@
 package raftkv
 
 import (
+	"context"
 	"encoding/gob"
-	"labrpc"
 	"log"
-	"raft"
 	"sync"
+
+	"cs6450.utah.systems/u1177988/labs/src/labrpc"
+	"cs6450.utah.systems/u1177988/labs/src/raft"
 )
 
 const Debug = 0
@@ -17,31 +19,35 @@ func DPrintf(format string, a ...interface{}) (n int, err error) {
 	return
 }
 
+type Method string
+
+const (
+	MethodGet    Method = "Get"
+	MethodPut    Method = "Put"
+	MethodAppend Method = "Append"
+)
 
 type Op struct {
 	// Your definitions here.
-	// Field names must start with capital letters,
-	// otherwise RPC will break.
+	Method Method
+	Key    string
+	Value  string
+	ID     int64
 }
 
 type RaftKV struct {
-	mu      sync.Mutex
-	me      int
-	rf      *raft.Raft
-	applyCh chan raft.ApplyMsg
+	sync.Mutex
+
+	me int
+	rf *raft.Raft
+
+	cancelAllContext context.CancelFunc
 
 	maxraftstate int // snapshot if log grows this big
 
 	// Your definitions here.
-}
-
-
-func (kv *RaftKV) Get(args *GetArgs, reply *GetReply) {
-	// Your code here.
-}
-
-func (kv *RaftKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
-	// Your code here.
+	KVstore  map[string]string
+	Commited map[int64]Op
 }
 
 //
@@ -52,6 +58,7 @@ func (kv *RaftKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 //
 func (kv *RaftKV) Kill() {
 	kv.rf.Kill()
+	kv.cancelAllContext()
 	// Your code here, if desired.
 }
 
@@ -77,12 +84,15 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	kv.me = me
 	kv.maxraftstate = maxraftstate
 
-	// You may need initialization code here.
+	kv.Commited = make(map[int64]Op)
+	kv.KVstore = make(map[string]string)
 
-	kv.applyCh = make(chan raft.ApplyMsg)
-	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
+	applyCh := make(chan raft.ApplyMsg)
+	kv.rf = raft.Make(servers, me, persister, applyCh)
 
-	// You may need initialization code here.
+	var ctx context.Context
+	ctx, kv.cancelAllContext = context.WithCancel(context.Background())
+	go kv.watchCommits(ctx, applyCh)
 
 	return kv
 }
