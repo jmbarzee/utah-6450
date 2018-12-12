@@ -19,7 +19,7 @@ import (
 	"testing"
 	"time"
 
-	"cs6450.utah.systems/u1177988/labs/src/labrpc"
+	"labrpc"
 )
 
 func randstring(n int) string {

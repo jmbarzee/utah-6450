@@ -2,9 +2,9 @@ package raftkv
 
 import (
 	"context"
-	"log"
+	"strings"
 
-	"cs6450.utah.systems/u1177988/labs/src/raft"
+	"../raft"
 )
 
 func (kv *RaftKV) watchCommits(ctx context.Context, applyCh chan raft.ApplyMsg) {
@@ -16,7 +16,7 @@ Loop:
 			{
 				op, ok := applyMsg.Command.(Op)
 				if !ok {
-					log.Printf("Command could not assert to expected type: *** %v *** %v ***", applyMsg, applyMsg.Command)
+					// log.Printf("Command could not assert to expected type: *** %v *** %v ***", applyMsg, applyMsg.Command)
 				}
 				switch op.Method {
 				case MethodGet:
@@ -36,9 +36,14 @@ Loop:
 					if !ok {
 						value = ""
 					}
-					op.Value = value + op.Value
-					kv.KVstore[op.Key] = op.Value
-					kv.Commited[op.ID] = op
+					if !strings.Contains(value, op.Value) {
+						op.Value = value + op.Value
+						kv.KVstore[op.Key] = op.Value
+						kv.Commited[op.ID] = op
+					} else {
+						op = op
+					}
+
 				}
 			}
 			kv.Unlock()

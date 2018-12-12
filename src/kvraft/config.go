@@ -10,8 +10,9 @@ import (
 	"sync"
 	"testing"
 
-	"cs6450.utah.systems/u1177988/labs/src/labrpc"
-	"cs6450.utah.systems/u1177988/labs/src/raft"
+	"labrpc"
+
+	"../raft"
 )
 
 func randstring(n int) string {

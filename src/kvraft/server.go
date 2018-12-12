@@ -1,13 +1,19 @@
 package raftkv
 
+//
+//	Jacob Barzee
+//	Matt Howa
+//		Worked together on Lab3
+
 import (
 	"context"
 	"encoding/gob"
 	"log"
 	"sync"
 
-	"cs6450.utah.systems/u1177988/labs/src/labrpc"
-	"cs6450.utah.systems/u1177988/labs/src/raft"
+	"labrpc"
+
+	"../raft"
 )
 
 const Debug = 0

@@ -213,6 +213,10 @@ Loop:
 						Command: rf.Entries[i].Command,
 					}
 
+					_, ok := message.Command.(int)
+					if ok {
+						continue
+					}
 					rf.debugf(Dump, "reportLogs - reporting {Index:%v}\n", message.Index)
 					applyCh <- message
 				}
