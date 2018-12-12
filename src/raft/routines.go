@@ -211,9 +211,17 @@ Loop:
 					message := ApplyMsg{
 						Index:   rf.Entries[i].Index,
 						Command: rf.Entries[i].Command,
+						Term:    rf.Term,
 					}
 
 					rf.debugf(Dump, "reportLogs - reporting {Index:%v}\n", message.Index)
+
+					//Added by matt (not sure if this is correct just needed to avoid sending message 0 for kvstore implementation)
+					//Might be able to fix on other end if this doesnt work
+					if message.Index == 0 {
+						continue
+					}
+
 					applyCh <- message
 				}
 			}
